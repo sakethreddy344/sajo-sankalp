@@ -402,15 +402,123 @@
   color: var(--green);
 }
 
-.notification-button i {
+.notification-container {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.notification-count {
   position: absolute;
   top: 5px;
-  right: 6px;
-  width: 6px;
-  height: 6px;
+  right: 2px;
+  display: grid;
+  min-width: 14px;
+  height: 14px;
+  place-items: center;
+  padding: 0 3px;
   border: 1px solid #fff;
-  border-radius: 50%;
-  background: #e39b69;
+  border-radius: 8px;
+  background: #d9875f;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.notification-popover {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(320px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid #e8ece6;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgb(34 49 37 / 15%);
+}
+
+.notification-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 15px;
+  border-bottom: 1px solid #eef0eb;
+  color: #435248;
+  font-size: 11px;
+}
+
+.notification-heading > span {
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  border-radius: 10px;
+  background: #edf4e9;
+  color: #58765b;
+  font-size: 9px;
+}
+
+.notification-popover ul {
+  margin: 0;
+  padding: 5px;
+  list-style: none;
+}
+
+.notification-popover li + li {
+  border-top: 1px solid #f0f1ee;
+}
+
+.notification-popover li button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #435248;
+  cursor: pointer;
+  text-align: left;
+}
+
+.notification-popover li button:hover {
+  background: #f5f8f3;
+}
+
+.notification-item-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: #f7f1e6;
+  color: #a8864b;
+}
+
+.notification-popover li button > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.notification-popover li strong {
+  color: #435248;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.notification-popover li small,
+.notification-empty {
+  color: #929b93;
+  font-size: 8px;
+}
+
+.notification-empty {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
 }
 
 .top-avatar {
@@ -2920,7 +3028,6 @@
   .search-box:focus-within kbd,
   .search-box:focus-within .search-clear { display: grid; }
   .topbar-actions { gap: 7px; }
-  .notification-button { display: none; }
   .page-content { padding: 24px 16px 19px; }
   .welcome-row { align-items: flex-start; margin-bottom: 18px; }
   .welcome-row h1 { font-size: 25px; }

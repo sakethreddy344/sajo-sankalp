@@ -83,6 +83,47 @@ function dateInputValue(date) {
   return `${year}-${month}-${day}`
 }
 
+function getLoginStreak(activityDates, today) {
+  const dateSet = new Set(activityDates)
+  const yesterday = new Date(`${today}T00:00:00`)
+  yesterday.setDate(yesterday.getDate() - 1)
+  let currentDate = dateSet.has(today) ? today : dateInputValue(yesterday)
+  if (!dateSet.has(currentDate)) return 0
+
+  let streak = 0
+  while (dateSet.has(currentDate)) {
+    streak += 1
+    const previousDate = new Date(`${currentDate}T00:00:00`)
+    previousDate.setDate(previousDate.getDate() - 1)
+    currentDate = dateInputValue(previousDate)
+  }
+  return streak
+}
+
+function getDueTomorrowNotifications(emis, cards, today) {
+  const tomorrow = new Date(`${today}T00:00:00`)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const lastDayOfMonth = new Date(tomorrow.getFullYear(), tomorrow.getMonth() + 1, 0).getDate()
+  const tomorrowDay = tomorrow.getDate()
+  const dueTomorrow = (item) => Number(item.dueDay) > 0
+    && Math.min(Number(item.dueDay), lastDayOfMonth) === tomorrowDay
+
+  return [
+    ...emis.filter(dueTomorrow).map((emi) => ({
+      id: `emi-${emi.id}`,
+      title: `${emi.name} EMI is due tomorrow`,
+      detail: `Monthly payment · ${formatMoney(Number(emi.amount))}`,
+      type: 'EMI',
+    })),
+    ...cards.filter(dueTomorrow).map((card) => ({
+      id: `card-${card.id}`,
+      title: `${card.name} payment is due tomorrow`,
+      detail: `Credit card · Due day ${card.dueDay}`,
+      type: 'Card',
+    })),
+  ]
+}
+
 const iconPaths = {
   grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
   lightbulb: <><path d="M9 18h6M10 22h4M8.2 14.5A7 7 0 1 1 15.8 14.5c-.9.7-1.3 1.5-1.4 2.5h-5c-.1-1-.5-1.8-1.2-2.5Z" /></>,
@@ -150,6 +191,10 @@ function App() {
   const [editingTransactionId, setEditingTransactionId] = useState(null)
   const [editingCommitmentId, setEditingCommitmentId] = useState(null)
   const [session, setSession] = useState(null)
+  const [loginStreak, setLoginStreak] = useState(null)
+  const [streakError, setStreakError] = useState('')
+  const [notificationDate, setNotificationDate] = useState(dateInputValue(appDate))
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [authLoading, setAuthLoading] = useState(supabaseConfigured)
   const [cloudLoading, setCloudLoading] = useState(false)
   const [cloudLoadedKey, setCloudLoadedKey] = useState('')
@@ -245,6 +290,11 @@ function App() {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       const nextUserId = nextSession?.user.id || ''
+      if (authUserIdRef.current !== nextUserId) {
+        setLoginStreak(null)
+        setStreakError('')
+      }
+      setStreakError('')
       if (authUserIdRef.current && authUserIdRef.current !== nextUserId) {
         setCareerTopics([])
         setSelectedCareerGoal('')
@@ -266,6 +316,48 @@ function App() {
 
     return () => authListener.subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const today = dateInputValue(new Date())
+      setNotificationDate((current) => current === today ? current : today)
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!session || !supabase) return undefined
+
+    let active = true
+    const today = dateInputValue(new Date())
+
+    const updateLoginStreak = async () => {
+      const { error: checkInError } = await supabase
+        .from('user_login_days')
+        .upsert({ user_id: session.user.id, activity_date: today }, {
+          onConflict: 'user_id,activity_date',
+          ignoreDuplicates: true,
+        })
+      if (checkInError) throw checkInError
+
+      const { data, error } = await supabase
+        .from('user_login_days')
+        .select('activity_date')
+        .eq('user_id', session.user.id)
+        .order('activity_date', { ascending: false })
+      if (error) throw error
+      if (active) setLoginStreak(getLoginStreak(data.map((row) => row.activity_date), today))
+    }
+
+    updateLoginStreak()
+      .catch((error) => {
+        if (active) setStreakError(`Could not update your login streak: ${error.message}`)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [session])
 
   useEffect(() => {
     if (!session || !supabase) return undefined
@@ -1617,6 +1709,7 @@ function App() {
   const monthDay = appDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
   const greeting = appDate.getHours() < 12 ? 'Good morning' : appDate.getHours() < 18 ? 'Good afternoon' : 'Good evening'
   const formatMoney = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', currencyDisplay: 'symbol', maximumFractionDigits: 0 }).format(amount)
+  const dueTomorrowNotifications = getDueTomorrowNotifications(emis, cards, notificationDate)
   const careerGoalItems = goals.filter((goal) => goal.category === 'Career & skills')
   const selectedCareerTopic = careerTopics.find((topic) => topic.id === selectedCareerTopicId) || null
   const careerTopicChildren = (parentId) => careerTopics
@@ -1751,7 +1844,23 @@ function App() {
                     : <p className="search-empty-hint">No matching items. Try another word.</p>}
               </div>}
             </div>
-            <button className="icon-button notification-button" aria-label="Notifications"><Icon name="bell" size={18} /><i /></button>
+            <div className="notification-container">
+              <button type="button" className="icon-button notification-button" aria-label={`Notifications${dueTomorrowNotifications.length ? `, ${dueTomorrowNotifications.length} due tomorrow` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen((open) => !open)}>
+                <Icon name="bell" size={18} />
+                {dueTomorrowNotifications.length > 0 && <span className="notification-count">{dueTomorrowNotifications.length}</span>}
+              </button>
+              {notificationsOpen && <section className="notification-popover" aria-label="Notifications">
+                <div className="notification-heading"><strong>Notifications</strong><span>{dueTomorrowNotifications.length}</span></div>
+                {dueTomorrowNotifications.length
+                  ? <ul>{dueTomorrowNotifications.map((item) => <li key={item.id}>
+                    <button type="button" onClick={() => { changePage('Money'); setSelectedYear(appDate.getFullYear()); setSelectedMonth(appDate.getMonth()); setNotificationsOpen(false) }}>
+                      <span className="notification-item-icon"><Icon name={item.type === 'EMI' ? 'clock' : 'card'} size={15} /></span>
+                      <span><strong>{item.title}</strong><small>{item.detail}</small></span>
+                    </button>
+                  </li>)}</ul>
+                  : <p className="notification-empty">No payments are due tomorrow.</p>}
+              </section>}
+            </div>
             <div className="profile-menu-container" ref={profileContainerRef}>
               <button className="top-avatar" aria-label="Account profile" aria-expanded={profileOpen} onClick={toggleProfile}>
                 {(profileUser?.user_metadata?.full_name || profileUser?.email || session.user.email || 'S').charAt(0).toUpperCase()}
@@ -1801,7 +1910,7 @@ function App() {
               <div className="art-hill art-hill-front" />
               <div className="art-path" />
               <div className="art-plant"><span /><span /><span /><i /></div>
-              <div className="art-stats"><strong>{completedDays.length} <small>/ 7</small></strong><span>days checked in</span><div className="mini-bars">{Array.from({ length: 5 }, (_, index) => <i key={index} />)}</div></div>
+              <div className="art-stats"><strong>{loginStreak ?? '…'} <small>days</small></strong><span>daily login streak</span><div className="mini-bars">{Array.from({ length: 5 }, (_, index) => <i key={index} />)}</div></div>
             </div>
             <span className="hero-grain" />
           </section>
@@ -1823,6 +1932,7 @@ function App() {
               <span className="stat-trend">{goals.length} goals at a glance</span>
             </article>
           </section>
+          {streakError && <p className="cloud-inline-error" role="alert">{streakError}</p>}
           </>}
 
           {activePage === 'Money' && (cloudDataLoading || cloudLoadError) ? <section className="panel cloud-gate">
