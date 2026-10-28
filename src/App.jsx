@@ -83,55 +83,6 @@ function dateInputValue(date) {
   return `${year}-${month}-${day}`
 }
 
-function escapeCalendarText(value) {
-  return String(value)
-    .replaceAll('\\', '\\\\')
-    .replaceAll(';', '\\;')
-    .replaceAll(',', '\\,')
-    .replaceAll(/\r?\n/g, '\\n')
-}
-
-function emiCalendarFile(emi) {
-  let nextDue
-  if (emi.startDate) {
-    nextDue = new Date(`${emi.startDate}T00:00:00`)
-  } else {
-    const today = new Date()
-    const dueDay = Number(emi.dueDay)
-    nextDue = new Date(today.getFullYear(), today.getMonth(), Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()))
-    if (nextDue < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
-      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1)
-      nextDue = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), Math.min(dueDay, new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate()))
-    }
-  }
-  const endDate = new Date(nextDue.getFullYear(), nextDue.getMonth(), nextDue.getDate() + 1)
-  const formatCalendarDate = (date) => `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`
-  const title = `EMI payment: ${emi.name}`
-  const details = `Monthly EMI: Rs ${Number(emi.amount).toLocaleString('en-IN')}. Reminder one day before the due date.`
-  return [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Daymark//EMI Reminder//EN',
-    'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT',
-    `UID:${window.crypto.randomUUID()}@daymark.local`,
-    `DTSTAMP:${new Date().toISOString().replaceAll('-', '').replaceAll(':', '').replace(/\.\d{3}/, '')}`,
-    `DTSTART;VALUE=DATE:${formatCalendarDate(nextDue)}`,
-    `DTEND;VALUE=DATE:${formatCalendarDate(endDate)}`,
-    `RRULE:FREQ=MONTHLY;BYMONTHDAY=${nextDue.getDate()}`,
-    `SUMMARY:${escapeCalendarText(title)}`,
-    `DESCRIPTION:${escapeCalendarText(details)}`,
-    'BEGIN:VALARM',
-    'ACTION:DISPLAY',
-    'DESCRIPTION:EMI due tomorrow',
-    'TRIGGER:-P1D',
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR',
-    '',
-  ].join('\r\n')
-}
-
 const iconPaths = {
   grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
   lightbulb: <><path d="M9 18h6M10 22h4M8.2 14.5A7 7 0 1 1 15.8 14.5c-.9.7-1.3 1.5-1.4 2.5h-5c-.1-1-.5-1.8-1.2-2.5Z" /></>,
@@ -163,18 +114,6 @@ const iconPaths = {
   lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,
   trash: <><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5" /></>,
   edit: <><path d="m15 5 4 4M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4Z" /></>,
-}
-
-const downloadEmiCalendarReminder = (emi) => {
-  const calendar = emiCalendarFile(emi)
-  const downloadUrl = URL.createObjectURL(new Blob([calendar], { type: 'text/calendar;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = downloadUrl
-  link.download = `${emi.name.trim().replace(/[^a-z0-9-]+/gi, '-') || 'emi'}-monthly-reminder.ics`
-  link.click()
-  URL.revokeObjectURL(downloadUrl)
-  setNotice('Calendar file downloaded. Import it into Google Calendar to receive monthly reminders.')
-  window.setTimeout(() => setNotice(''), 5000)
 }
 
 function Icon({ name, size = 18, className = '' }) {
@@ -209,6 +148,7 @@ function App() {
   const [moneyModalOpen, setMoneyModalOpen] = useState(false)
   const [moneyModalType, setMoneyModalType] = useState('transaction')
   const [editingTransactionId, setEditingTransactionId] = useState(null)
+  const [editingCommitmentId, setEditingCommitmentId] = useState(null)
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(supabaseConfigured)
   const [cloudLoading, setCloudLoading] = useState(false)
@@ -1287,6 +1227,7 @@ function App() {
   const openMoneyForm = (type = 'transaction') => {
     setCloudError('')
     setEditingTransactionId(null)
+    setEditingCommitmentId(null)
     setMoneyModalType(type)
     setEntryType(type === 'emi' ? 'EMI payment' : type === 'card' ? 'Card purchase' : 'Spending')
     setEntryName('')
@@ -1300,9 +1241,35 @@ function App() {
     setMoneyModalOpen(true)
   }
 
+  const openEditCommitment = (type, commitment) => {
+    setCloudError('')
+    setEditingTransactionId(null)
+    setEditingCommitmentId(commitment.id)
+    setMoneyModalType(type)
+    setEntryType(type === 'emi' ? 'EMI payment' : 'Card purchase')
+    setEntryName(commitment.name)
+    setEntryReason('')
+    const openingBalance = type === 'card'
+      ? cards.find((card) => card.id === commitment.id)?.amount ?? commitment.amount
+      : commitment.amount
+    setEntryAmount(String(openingBalance))
+    setEntryDate(`${selectedYear}-${String((selectedMonth ?? appDate.getMonth()) + 1).padStart(2, '0')}-01`)
+    setEntryCategory(type === 'emi' ? 'EMI payment' : 'Credit card payment')
+    setEntryCard('')
+    setEntryDueDay(type === 'card' ? commitment.dueDay : '')
+    const emiDueDate = commitment.startDate || dateInputValue(new Date(
+      appDate.getFullYear(),
+      appDate.getMonth(),
+      Math.min(Number(commitment.dueDay), new Date(appDate.getFullYear(), appDate.getMonth() + 1, 0).getDate()),
+    ))
+    setEntryDueDate(type === 'emi' ? emiDueDate : dateInputValue(appDate))
+    setMoneyModalOpen(true)
+  }
+
   const openEditTransaction = (transaction) => {
     setCloudError('')
     setEditingTransactionId(transaction.id)
+    setEditingCommitmentId(null)
     setMoneyModalType('transaction')
     setEntryType(transaction.type === 'Income' ? 'Income' : 'Spending')
     setEntryName(transaction.name)
@@ -1320,22 +1287,54 @@ function App() {
     const amount = Number(entryAmount)
     const name = entryName.trim()
     const reason = entryReason.trim()
-    if (!name || !Number.isFinite(amount) || amount <= 0) return
-    const id = window.crypto.randomUUID()
+    if (!name || !Number.isFinite(amount) || (moneyModalType === 'card' ? amount < 0 : amount <= 0)) return
+    const id = editingCommitmentId || window.crypto.randomUUID()
     setCloudError('')
     setCloudLoading(true)
     try {
       if (moneyModalType === 'emi') {
         if (!entryDueDate) return
         const draft = { id, name, amount, dueDay: Number(entryDueDate.slice(-2)), startDate: entryDueDate }
-        const { data, error } = await supabase.from('emis').insert(toEmiRow(draft, session.user.id)).select().single()
-        if (error) throw error
-        setEmis((current) => [...current, fromEmiRow(data)])
+        const result = editingCommitmentId
+          ? await supabase.from('emis').update({
+            name,
+            monthly_emi: amount,
+            due_day: draft.dueDay,
+            start_date: draft.startDate,
+          }).eq('id', editingCommitmentId).eq('user_id', session.user.id).select().single()
+          : await supabase.from('emis').insert(toEmiRow(draft, session.user.id)).select().single()
+        if (result.error) throw result.error
+        const savedEmi = fromEmiRow(result.data)
+        if (editingCommitmentId) {
+          setEmis((current) => current.map((emi) => emi.id === editingCommitmentId ? savedEmi : emi))
+        } else {
+          setEmis((current) => [...current, savedEmi])
+        }
       } else if (moneyModalType === 'card') {
-        const draft = { id, name, amount: amount || 0, dueDay: entryDueDay }
-        const { data, error } = await supabase.from('cards').insert(toCardRow(draft, session.user.id)).select().single()
-        if (error) throw error
-        setCards((current) => [...current, fromCardRow(data)])
+        if (editingCommitmentId) {
+          if (!cards.some((card) => card.id === editingCommitmentId)) throw new Error('The credit card could not be found.')
+        }
+        const draft = { id, name, amount, dueDay: entryDueDay }
+        const result = editingCommitmentId
+          ? await supabase.from('cards').update({
+            name,
+            due_day: entryDueDay ? Number(entryDueDay) : null,
+            opening_balance: amount,
+          }).eq('id', editingCommitmentId).eq('user_id', session.user.id).select().single()
+          : await supabase.from('cards').insert(toCardRow(draft, session.user.id)).select().single()
+        if (result.error) throw result.error
+        const savedCard = fromCardRow(result.data)
+        if (editingCommitmentId) {
+          const oldCard = cards.find((card) => card.id === editingCommitmentId)
+          setCards((current) => current.map((card) => card.id === editingCommitmentId ? savedCard : card))
+          setTransactions((current) => current.map((entry) => (
+            entry.cardId === editingCommitmentId || (!entry.cardId && entry.cardName === oldCard?.name)
+              ? { ...entry, cardName: name }
+              : entry
+          )))
+        } else {
+          setCards((current) => [...current, savedCard])
+        }
       } else {
         if (entryType !== 'Income' && (!reason || !entryCategory)) return
         const updatedEntry = { id: editingTransactionId || id, name, reason, amount, date: entryDate, type: entryType, category: entryType === 'Income' ? '' : entryCategory, cardName: entryType === 'Income' ? '' : entryCard }
@@ -1353,7 +1352,12 @@ function App() {
       }
       setMoneyModalOpen(false)
       setEditingTransactionId(null)
-      setNotice(moneyModalType === 'emi' ? 'EMI reminder added to Supabase.' : moneyModalType === 'card' ? 'Card saved to Supabase.' : editingTransactionId ? 'Payment updated in Supabase.' : 'Payment saved to Supabase.')
+      setEditingCommitmentId(null)
+      setNotice(moneyModalType === 'emi'
+        ? `${editingCommitmentId ? 'EMI' : 'EMI reminder'} ${editingCommitmentId ? 'updated' : 'added'} in Supabase.`
+        : moneyModalType === 'card'
+          ? `Card ${editingCommitmentId ? 'updated' : 'saved'} in Supabase.`
+          : editingTransactionId ? 'Payment updated in Supabase.' : 'Payment saved to Supabase.')
       window.setTimeout(() => setNotice(''), 2600)
     } catch (error) {
       setCloudError(`Could not save this record to Supabase: ${error.message}`)
@@ -1902,11 +1906,10 @@ function App() {
                 <section className="panel commitment-panel">
                   <div className="section-heading"><div><span className="section-kicker">MONTHLY COMMITMENTS</span><h2>EMIs <span className="heading-count">{emis.length}</span></h2></div><button className="round-arrow" aria-label="Add EMI" onClick={() => openMoneyForm('emi')}><Icon name="plus" size={16} /></button></div>
                   {emis.map((emi) => {
-                    const payments = monthTransactions.filter((entry) => entry.category === 'EMI payment' && entry.name === emi.name)
+                    const payments = monthTransactions.filter((entry) => entry.category === 'EMI payment' && (entry.emiId === emi.id || (!entry.emiId && entry.name === emi.name)))
                     return <article className="commitment-item" key={emi.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>{formatMoney(Number(emi.amount))} / month · Due day {emi.dueDay || '—'}</span></div><button className="small-action" onClick={() => recordCommitmentPayment('EMI payment', emi)}>Log payment</button><button className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
-                      <button className="commitment-add emi-calendar-button" onClick={() => downloadEmiCalendarReminder(emi)}>Download Google Calendar reminder (.ics)</button>
-                      <div className="commitment-activity">{payments.length ? payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> Paid {formatMoney(Number(payment.amount))} on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>) : <span className="no-activity">No EMI payment logged for {monthNames[selectedMonth]}.</span>}</div>
+                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>{formatMoney(Number(emi.amount))} / month · Due day {emi.dueDay || '—'}</span></div><button className="small-action" onClick={() => recordCommitmentPayment('EMI payment', emi)}>Log payment</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit EMI: ${emi.name}`} title="Edit EMI" disabled={cloudLoading} onClick={() => openEditCommitment('emi', emi)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
+                      {payments.length > 0 && <div className="commitment-activity">{payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> Paid {formatMoney(Number(payment.amount))} on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>)}</div>}
                     </article>
                   })}
                   {emis.length === 0 && <p className="commitment-empty">Add each current EMI with its monthly amount and due day to see all your commitments here.</p>}
@@ -1917,7 +1920,7 @@ function App() {
                   {cardsWithBalances.map((card) => {
                     const payments = monthTransactions.filter((entry) => (entry.category === 'Credit card payment' || entry.category === 'Card repayment') && (entry.cardName === card.name || entry.name === card.name))
                     return <article className="commitment-item" key={card.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-card"><Icon name="card" size={16} /></span><div><strong>{card.name}</strong><span>{card.dueDay ? `Due day ${card.dueDay} · ` : ''}Balance {formatMoney(card.amount)}</span></div><button className="small-action" onClick={() => { setEntryName(card.name); setEntryReason(`Payment toward ${card.name} credit card`); setEntryAmount(String(card.amount || '')); setEntryType('Spending'); setEntryCategory('Card repayment'); setEntryCard(card.name); setEntryDate(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && selectedMonth === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`); setMoneyModalType('transaction'); setMoneyModalOpen(true) }}>Record repayment</button><button className="transaction-delete commitment-delete" aria-label={`Delete credit card: ${card.name}`} title="Delete credit card" disabled={cloudLoading} onClick={() => deleteCard(card)}><Icon name="trash" size={15} /></button></div>
+                      <div className="commitment-row"><span className="commitment-icon commitment-card"><Icon name="card" size={16} /></span><div><strong>{card.name}</strong><span>{card.dueDay ? `Due day ${card.dueDay} · ` : ''}Balance {formatMoney(card.amount)}</span></div><button className="small-action" onClick={() => { setEntryName(card.name); setEntryReason(`Payment toward ${card.name} credit card`); setEntryAmount(String(card.amount || '')); setEntryType('Spending'); setEntryCategory('Card repayment'); setEntryCard(card.name); setEntryDate(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && selectedMonth === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`); setMoneyModalType('transaction'); setMoneyModalOpen(true) }}>Record repayment</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit credit card: ${card.name}`} title="Edit credit card" disabled={cloudLoading} onClick={() => openEditCommitment('card', card)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete credit card: ${card.name}`} title="Delete credit card" disabled={cloudLoading} onClick={() => deleteCard(card)}><Icon name="trash" size={15} /></button></div>
                       <div className="commitment-activity">{payments.length ? payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> {payment.category}: {formatMoney(Number(payment.amount))} · {payment.reason}</span>) : <span className="no-activity">No card payment logged for {monthNames[selectedMonth]}.</span>}</div>
                     </article>
                   })}
@@ -2117,7 +2120,7 @@ function App() {
                 {goals.map((goal) => (
                   <article className="goal-row" key={goal.title}>
                     <button className="goal-open-button" onClick={() => goal.category === 'Career & skills' ? openCareerGoal(goal) : openPersonalGoalNotes(goal)} aria-label={`Go to ${goal.title}`}>Go <Icon name="arrow" size={13} /></button>
-                    <div className="goal-main"><div className="goal-title-row"><h3>{goal.title}</h3>{goal.category !== 'Career & skills' && <span>{goal.progress}/{goal.total}</span>}</div><p>{goal.category}</p></div>
+                    <div className="goal-main"><div className="goal-title-row"><h3>{goal.title}</h3></div><p>{goal.category}</p></div>
                   </article>
                 ))}
               </div>
@@ -2191,8 +2194,8 @@ function App() {
           <button type="button" className="modal-close" onClick={() => setMoneyModalOpen(false)} aria-label="Close"><Icon name="close" size={18} /></button>
           <div className="modal-mark money-modal-mark"><Icon name={moneyModalType === 'transaction' ? 'wallet' : moneyModalType === 'emi' ? 'clock' : 'card'} size={21} /></div>
           <span className="section-kicker">{moneyModalType === 'transaction' ? 'KEEP YOUR MONEY LOG CURRENT' : moneyModalType === 'emi' ? 'MONTHLY COMMITMENT' : 'PAYMENT METHOD'}</span>
-          <h2>{moneyModalType === 'transaction' ? editingTransactionId ? 'Edit payment' : 'Add a money entry' : moneyModalType === 'emi' ? 'Add an EMI reminder' : 'Add a credit card'}</h2>
-          <p>{moneyModalType === 'transaction' ? 'Your entries are saved to your private Supabase account.' : moneyModalType === 'emi' ? 'Save this EMI to Supabase, then download a recurring Google Calendar reminder.' : 'Card details are saved to your private Supabase account.'}</p>
+          <h2>{moneyModalType === 'transaction' ? editingTransactionId ? 'Edit payment' : 'Add a money entry' : moneyModalType === 'emi' ? editingCommitmentId ? 'Edit EMI' : 'Add an EMI reminder' : editingCommitmentId ? 'Edit credit card' : 'Add a credit card'}</h2>
+          <p>{moneyModalType === 'transaction' ? 'Your entries are saved to your private Supabase account.' : moneyModalType === 'emi' ? 'Your EMI details are saved to your private Supabase account.' : 'Card details are saved to your private Supabase account.'}</p>
           {moneyModalType === 'transaction' && <><label htmlFor="entry-type">Entry type</label><select id="entry-type" value={entryType} onChange={(event) => { setEntryType(event.target.value); setEntryCategory(''); setEntryCard('') }}><option>Income</option><option>Spending</option></select></>}
           <label htmlFor="entry-name">{moneyModalType === 'transaction' ? entryType === 'Income' ? 'Income source' : 'Payment or merchant' : moneyModalType === 'emi' ? 'EMI or loan name' : 'Card name'}</label>
           <input id="entry-name" autoFocus maxLength={100} value={entryName} onChange={(event) => setEntryName(event.target.value)} placeholder={moneyModalType === 'transaction' ? entryType === 'Income' ? 'e.g. Salary, freelance, other income' : 'e.g. Grocery shop, electricity bill' : moneyModalType === 'emi' ? 'e.g. Home or vehicle EMI' : 'e.g. Bank or card nickname'} required />
@@ -2212,12 +2215,12 @@ function App() {
               </select>
             </>}
           </>}
-          <label htmlFor="entry-amount">{moneyModalType === 'card' ? 'Current balance (optional)' : moneyModalType === 'emi' ? 'Monthly payment amount (₹)' : 'Amount (₹)'}</label>
+          <label htmlFor="entry-amount">{moneyModalType === 'card' ? editingCommitmentId ? 'Opening balance' : 'Current balance (optional)' : moneyModalType === 'emi' ? 'Monthly payment amount (₹)' : 'Amount (₹)'}</label>
           <input id="entry-amount" type="number" min={moneyModalType === 'card' ? '0' : '0.01'} step="0.01" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} placeholder="0.00" required={moneyModalType !== 'card'} />
           {moneyModalType === 'transaction' && <><label htmlFor="entry-date">Date</label><input id="entry-date" type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} required /></>}
-          {moneyModalType === 'emi' && <><label htmlFor="entry-due-date">First EMI due date <span>REQUIRED</span></label><input id="entry-due-date" type="date" value={entryDueDate} onChange={(event) => setEntryDueDate(event.target.value)} required /><p className="form-hint">The Google Calendar event will repeat monthly and alert you one day before.</p></>}
+          {moneyModalType === 'emi' && <><label htmlFor="entry-due-date">First EMI due date <span>REQUIRED</span></label><input id="entry-due-date" type="date" value={entryDueDate} onChange={(event) => setEntryDueDate(event.target.value)} required /><p className="form-hint">The day of this date is used as the EMI due day.</p></>}
           {moneyModalType === 'card' && <><label htmlFor="entry-due">Payment due day</label><input id="entry-due" type="number" min="1" max="31" value={entryDueDay} onChange={(event) => setEntryDueDay(event.target.value)} placeholder="Day of month, e.g. 15" /></>}
-          <button type="submit" className="primary-button modal-submit"><Icon name="check" size={16} /> {moneyModalType === 'transaction' ? editingTransactionId ? 'Save changes' : 'Save entry' : moneyModalType === 'emi' ? 'Save EMI reminder' : 'Save card'}</button>
+          <button type="submit" className="primary-button modal-submit"><Icon name="check" size={16} /> {moneyModalType === 'transaction' ? editingTransactionId ? 'Save changes' : 'Save entry' : editingCommitmentId ? 'Save changes' : moneyModalType === 'emi' ? 'Save EMI reminder' : 'Save card'}</button>
         </form>
       </div>}
       {addTripOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !tripSaving) setAddTripOpen(false) }}>

@@ -2272,8 +2272,15 @@
 }
 
 .commitment-row:hover .commitment-delete,
+.commitment-row:hover .commitment-edit,
+.commitment-edit:focus-visible,
 .commitment-delete:focus-visible {
   opacity: 1;
+}
+
+.commitment-edit:disabled {
+  cursor: wait;
+  opacity: .4;
 }
 
 .commitment-delete:disabled {
@@ -2368,14 +2375,6 @@
   color: #718774;
   cursor: pointer;
   font-size: 9px;
-}
-
-.emi-calendar-button {
-  height: auto;
-  min-height: 30px;
-  margin: 8px 0;
-  border-style: solid;
-  font-size: 8px;
 }
 
 .money-tip {
