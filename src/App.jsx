@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { fromCardRow, fromEmiRow, fromMoneyEntryRow, toCardRow, toEmiRow, toMoneyEntryRow } from './moneyData'
 import { supabase, supabaseConfigured } from './supabase'
 import './App.css'
@@ -6,16 +6,38 @@ import './App.css'
 const appDate = new Date()
 const monthNames = Array.from({ length: 12 }, (_, index) => new Date(2026, index, 1).toLocaleDateString('en-IN', { month: 'long' }))
 const paymentSources = ['UPI spent', 'Cash spent', 'Credit card payment', 'Card repayment', 'EMI payment', 'Other spending']
+const businessImageBucket = 'business-exploration-images'
+const tripMediaBucket = 'trip-memories'
+const maxTripPhotoSize = 10 * 1024 * 1024
+const maxTripVideoSize = 50 * 1024 * 1024
+const maxTripMedia = 30
+const tripMediaTypes = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+}
+const noteTableByType = {
+  business: { table: 'business_exploration_notes', idColumn: 'idea_id', titleColumn: 'idea_title', pathPrefix: '' },
+  personal: { table: 'personal_life_notes', idColumn: 'goal_id', titleColumn: 'goal_title', pathPrefix: 'personal-life/' },
+}
+const maxBusinessImageSize = 5 * 1024 * 1024
+const maxBusinessImages = 8
 
 const initialIdeas = [
-  { title: 'Clothing industry', category: 'Business exploration', note: 'Explore customer, product, sourcing, startup cost, and sales channel.', color: 'peach', stage: 'To explore', icon: 'spark' },
-  { title: 'PG (paying guest)', category: 'Business exploration', note: 'Research locations, occupancy, rent, setup costs, and local requirements.', color: 'mint', stage: 'To explore', icon: 'globe' },
-  { title: 'Event management', category: 'Business exploration', note: 'Explore event types, client demand, packages, and how to get first clients.', color: 'lavender', stage: 'To explore', icon: 'heart' },
-  { title: 'Water bottle business', category: 'Business exploration', note: 'Research product options, manufacturing, differentiation, and margins.', color: 'mint', stage: 'To explore', icon: 'leaf' },
+  { id: 'clothing-industry', title: 'Clothing industry', category: 'Business exploration', note: 'Explore customer, product, sourcing, startup cost, and sales channel.', color: 'peach', stage: 'To explore', icon: 'spark' },
+  { id: 'pg-paying-guest', title: 'PG (paying guest)', category: 'Business exploration', note: 'Research locations, occupancy, rent, setup costs, and local requirements.', color: 'mint', stage: 'To explore', icon: 'globe' },
+  { id: 'event-management', title: 'Event management', category: 'Business exploration', note: 'Explore event types, client demand, packages, and how to get first clients.', color: 'lavender', stage: 'To explore', icon: 'heart' },
+  { id: 'water-bottle-business', title: 'Water bottle business', category: 'Business exploration', note: 'Research product options, manufacturing, differentiation, and margins.', color: 'mint', stage: 'To explore', icon: 'leaf' },
+  { id: 'dairy-farming', title: 'Dairy farming', category: 'Business exploration', note: 'Explore livestock, feed and care, setup costs, milk demand, and local requirements.', color: 'mint', stage: 'To explore', icon: 'leaf' },
 ]
 
 const initialGoals = [
   { title: 'Learn DSA, Java, C#, system design & cloud', detail: 'Career & skills · Choose a topic and log a study session.', progress: 0, total: 5, color: 'green', category: 'Career & skills' },
+  { title: 'Learn through Crackify courses', detail: 'Career & skills · Work through your enrolled Crackify courses and track each learning milestone.', progress: 0, total: 5, color: 'purple', category: 'Career & skills' },
   { title: 'Improve English speaking & communication', detail: 'Career & skills · Practise speaking, listening, and expressing ideas.', progress: 0, total: 5, color: 'orange', category: 'Career & skills' },
   { title: 'Home remodeling', detail: 'Personal & life · Plan ideas, priorities, and budget.', progress: 0, total: 4, color: 'purple', category: 'Personal & life' },
   { title: 'Marriage', detail: 'Personal & life · Keep plans, conversations, and next steps together.', progress: 0, total: 4, color: 'green', category: 'Personal & life' },
@@ -34,7 +56,17 @@ const navItems = [
 function usePersistentState(key, initialValue) {
   const [value, setValue] = useState(() => {
     const saved = window.localStorage.getItem(key)
-    return saved === null ? initialValue : JSON.parse(saved)
+    if (saved === null) return initialValue
+
+    const parsed = JSON.parse(saved)
+    if (!['daymark-ideas', 'daymark-goals'].includes(key) || !Array.isArray(parsed)) return parsed
+
+    const savedItems = key === 'daymark-ideas'
+      ? parsed.map((item) => ({ ...item, id: item.id || window.crypto.randomUUID() }))
+      : parsed
+    const existingTitles = new Set(savedItems.map((item) => item.title))
+    const newItems = initialValue.filter((item) => !existingTitles.has(item.title))
+    return [...savedItems, ...newItems]
   })
 
   useEffect(() => {
@@ -126,6 +158,8 @@ const iconPaths = {
   receipt: <><path d="M4 3v18l4-2 4 2 4-2 4 2V3l-4 2-4-2-4 2-4-2Z" /><path d="M9 10h6M9 14h6" /></>,
   income: <><path d="M12 19V5M6 11l6-6 6 6" /></>,
   expense: <><path d="M12 5v14M18 13l-6 6-6-6" /></>,
+  maximize: <><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" /></>,
+  minimize: <><path d="M8 3v5H3M16 3v5h5M21 16h-5v5M3 16h5v5" /></>,
   lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,
   trash: <><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5" /></>,
   edit: <><path d="m15 5 4 4M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4Z" /></>,
@@ -185,6 +219,41 @@ function App() {
   const [cloudRefreshCount, setCloudRefreshCount] = useState(0)
   const [ideaTitle, setIdeaTitle] = useState('')
   const [ideaNote, setIdeaNote] = useState('')
+  const [selectedIdea, setSelectedIdea] = useState(null)
+  const [selectedNoteType, setSelectedNoteType] = useState('business')
+  const [businessNote, setBusinessNote] = useState('')
+  const [businessNoteImagePaths, setBusinessNoteImagePaths] = useState([])
+  const [businessNoteInitialImagePaths, setBusinessNoteInitialImagePaths] = useState([])
+  const [businessNoteImages, setBusinessNoteImages] = useState([])
+  const [businessNoteFiles, setBusinessNoteFiles] = useState([])
+  const [businessNoteLoading, setBusinessNoteLoading] = useState(false)
+  const [businessNoteSaving, setBusinessNoteSaving] = useState(false)
+  const [businessNoteLoadError, setBusinessNoteLoadError] = useState('')
+  const [businessNoteError, setBusinessNoteError] = useState('')
+  const [businessImageError, setBusinessImageError] = useState('')
+  const [businessNoteReload, setBusinessNoteReload] = useState(0)
+  const [deletingIdeaIds, setDeletingIdeaIds] = useState([])
+  const [personalView, setPersonalView] = useState('goals')
+  const [trips, setTrips] = useState([])
+  const [tripsLoading, setTripsLoading] = useState(false)
+  const [tripsLoaded, setTripsLoaded] = useState(false)
+  const [tripsError, setTripsError] = useState('')
+  const [tripsReload, setTripsReload] = useState(0)
+  const [addTripOpen, setAddTripOpen] = useState(false)
+  const [newTripTitle, setNewTripTitle] = useState('')
+  const [newTripDate, setNewTripDate] = useState('')
+  const [tripSaving, setTripSaving] = useState(false)
+  const [selectedTrip, setSelectedTrip] = useState(null)
+  const [tripDate, setTripDate] = useState('')
+  const [tripNotes, setTripNotes] = useState('')
+  const [tripMediaPaths, setTripMediaPaths] = useState([])
+  const [tripMediaFiles, setTripMediaFiles] = useState([])
+  const [tripSignedMedia, setTripSignedMedia] = useState([])
+  const [tripMediaLoading, setTripMediaLoading] = useState(false)
+  const [tripMediaError, setTripMediaError] = useState('')
+  const [tripMediaReload, setTripMediaReload] = useState(0)
+  const [tripCarouselIndex, setTripCarouselIndex] = useState(0)
+  const [tripCarouselExpanded, setTripCarouselExpanded] = useState(false)
   const [entryType, setEntryType] = useState('Spending')
   const [entryName, setEntryName] = useState('')
   const [entryReason, setEntryReason] = useState('')
@@ -195,6 +264,14 @@ function App() {
   const [entryDueDay, setEntryDueDay] = useState('')
   const [entryDueDate, setEntryDueDate] = useState(dateInputValue(appDate))
   const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchInputRef = useRef(null)
+  const searchContainerRef = useRef(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState('')
+  const [profileUser, setProfileUser] = useState(null)
+  const profileContainerRef = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const cloudRequestKey = session ? `${session.user.id}:${cloudRefreshCount}` : ''
@@ -240,6 +317,7 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'emis', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'money_entries', filter: `user_id=eq.${userId}` }, refreshData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips', filter: `user_id=eq.${userId}` }, () => setTripsReload((count) => count + 1))
       .subscribe((status, error) => {
         if (!active) return
         if (status === 'SUBSCRIBED') {
@@ -315,11 +393,170 @@ function App() {
     }
   }, [session, cloudRequestKey, setCards, setEmis, setTransactions])
 
+  useEffect(() => {
+    if (!session || !supabase) return undefined
+
+    let active = true
+    const loadTrips = async () => {
+      const { data, error } = await supabase
+        .from('trips')
+        .select('id, title, trip_date, notes, media, created_at')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      if (active) {
+        setTrips(data)
+        setTripsError('')
+      }
+    }
+
+    loadTrips()
+      .catch((error) => {
+        if (active) setTripsError(`Could not load your trips: ${error.message}`)
+      })
+      .finally(() => {
+        if (active) {
+          setTripsLoading(false)
+          setTripsLoaded(true)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [session, tripsReload])
+
+  useEffect(() => {
+    const handleSearchShortcut = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+        setSearchOpen(true)
+      } else if (event.key === 'Escape') {
+        setSearchOpen(false)
+        setProfileOpen(false)
+        searchInputRef.current?.blur()
+      }
+    }
+
+    const handleOutsidePointer = (event) => {
+      if (!searchContainerRef.current?.contains(event.target)) setSearchOpen(false)
+      if (!profileContainerRef.current?.contains(event.target)) setProfileOpen(false)
+    }
+
+    window.addEventListener('keydown', handleSearchShortcut)
+    document.addEventListener('pointerdown', handleOutsidePointer)
+    return () => {
+      window.removeEventListener('keydown', handleSearchShortcut)
+      document.removeEventListener('pointerdown', handleOutsidePointer)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedTrip) return undefined
+
+    let active = true
+    const loadTripMedia = async () => {
+      const media = Array.isArray(selectedTrip.media) ? selectedTrip.media : []
+      const signedMedia = await Promise.all(media.map(async (item) => {
+        const { data, error } = await supabase.storage
+          .from(tripMediaBucket)
+          .createSignedUrl(item.path, 60 * 60)
+        if (error) throw error
+        return { ...item, url: data.signedUrl }
+      }))
+      if (active) {
+        setTripSignedMedia(signedMedia)
+        setTripCarouselIndex(0)
+      }
+    }
+
+    loadTripMedia()
+      .catch((error) => {
+        if (active) setTripMediaError(`Could not load trip memories: ${error.message}`)
+      })
+      .finally(() => {
+        if (active) setTripMediaLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedTrip, tripMediaReload])
+
+  useEffect(() => {
+    if (!tripCarouselExpanded) return undefined
+
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setTripCarouselExpanded(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [tripCarouselExpanded])
+
+  useEffect(() => {
+    if (!selectedIdea) return undefined
+
+    let active = true
+    const noteConfig = noteTableByType[selectedNoteType]
+
+    const loadSavedNote = async () => {
+      if (!supabase || !session) throw new Error('Sign in to load your saved research notes.')
+
+      const { data, error } = await supabase
+        .from(noteConfig.table)
+        .select('content, image_paths')
+        .eq('user_id', session.user.id)
+        .eq(noteConfig.idColumn, selectedIdea.id)
+        .maybeSingle()
+      if (error) throw error
+
+      const imagePaths = Array.isArray(data?.image_paths)
+        ? data.image_paths.filter((path) => typeof path === 'string')
+        : []
+      const images = await Promise.all(imagePaths.map(async (path) => {
+        const { data: signedImage, error: signedImageError } = await supabase.storage
+          .from(businessImageBucket)
+          .createSignedUrl(path, 60 * 60)
+        if (signedImageError) throw signedImageError
+        return { path, url: signedImage.signedUrl }
+      }))
+      if (!active) return
+
+      setBusinessNote(data?.content || '')
+      setBusinessNoteImagePaths(imagePaths)
+      setBusinessNoteInitialImagePaths(imagePaths)
+      setBusinessNoteImages(images)
+    }
+
+    loadSavedNote()
+      .catch((error) => {
+        if (active) setBusinessNoteLoadError(`Could not load notes for this ${selectedNoteType === 'business' ? 'idea' : 'goal'}: ${error.message}`)
+      })
+      .finally(() => {
+        if (active) setBusinessNoteLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [session, selectedIdea, selectedNoteType, businessNoteReload])
+
   const visibleIdeas = useMemo(() => ideas.filter((idea) => (
     `${idea.title} ${idea.category} ${idea.note}`.toLowerCase().includes(query.toLowerCase())
   )), [ideas, query])
   const activeMonthIndex = selectedMonth ?? appDate.getMonth()
   const selectedMonthKey = `${selectedYear}-${String(activeMonthIndex + 1).padStart(2, '0')}`
+  const tripCarouselItems = [
+    ...tripSignedMedia,
+    ...tripMediaFiles.map((item) => ({ ...item, url: item.previewUrl, local: true })),
+  ]
   const yearTransactions = transactions.filter((entry) => entry.date?.slice(0, 4) === String(selectedYear))
   const monthTransactions = yearTransactions.filter((entry) => entry.date?.slice(0, 7) === selectedMonthKey)
   const cardsWithBalances = cards.map((card) => ({
@@ -417,6 +654,32 @@ function App() {
     }
   }
 
+  const loadProfile = async () => {
+    setProfileLoading(true)
+    setProfileError('')
+    try {
+      if (!supabase) throw new Error('Supabase is not configured.')
+      const { data, error } = await supabase.auth.getUser()
+      if (error) throw error
+      if (!data.user) throw new Error('No signed-in user was returned.')
+      setProfileUser(data.user)
+    } catch (error) {
+      setProfileError(`Could not load your account details: ${error.message}`)
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  const toggleProfile = () => {
+    if (profileOpen) {
+      setProfileOpen(false)
+      return
+    }
+
+    setProfileOpen(true)
+    loadProfile()
+  }
+
   const downloadLocalFinanceBackup = () => {
     try {
       const backup = window.localStorage.getItem('daymark-pre-supabase-finance-v1')
@@ -438,11 +701,340 @@ function App() {
     setModalOpen(true)
   }
 
+  const openSavedNotes = (item, type) => {
+    setSelectedNoteType(type)
+    setSelectedIdea(item)
+    setBusinessNoteLoading(true)
+    setBusinessNote('')
+    setBusinessNoteImagePaths([])
+    setBusinessNoteInitialImagePaths([])
+    setBusinessNoteImages([])
+    setBusinessNoteFiles([])
+    setBusinessNoteLoadError('')
+    setBusinessNoteError('')
+    setBusinessImageError('')
+  }
+
+  const openIdeaNotes = (idea) => openSavedNotes(idea, 'business')
+
+  const openPersonalGoalNotes = (goal) => {
+    const id = goal.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    openSavedNotes({ id, title: goal.title }, 'personal')
+  }
+
+  const openTrips = () => {
+    setTripsError('')
+    if (!tripsLoaded) setTripsLoading(true)
+    setPersonalView('trips')
+  }
+
+  const openTrip = (trip) => {
+    setSelectedTrip(trip)
+    setTripDate(trip.trip_date || '')
+    setTripNotes(trip.notes || '')
+    setTripMediaPaths(Array.isArray(trip.media) ? trip.media : [])
+    setTripMediaFiles([])
+    setTripSignedMedia([])
+    setTripMediaError('')
+    setTripMediaLoading(true)
+    setTripCarouselIndex(0)
+  }
+
+  const closeTrip = () => {
+    tripMediaFiles.forEach((media) => URL.revokeObjectURL(media.previewUrl))
+    setTripMediaFiles([])
+    setSelectedTrip(null)
+    setTripMediaError('')
+  }
+
+  const createTrip = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session) {
+      setTripsError('Sign in to add a trip.')
+      return
+    }
+
+    const title = newTripTitle.trim()
+    if (!title) return
+    const date = newTripDate.trim()
+
+    setTripSaving(true)
+    setTripsError('')
+    try {
+      const { data, error } = await supabase.from('trips').insert({
+        user_id: session.user.id,
+        title,
+        trip_date: date,
+      }).select('id, title, trip_date, notes, media, created_at').single()
+      if (error) throw error
+
+      setTrips((current) => [data, ...current])
+      setNewTripTitle('')
+      setNewTripDate('')
+      setAddTripOpen(false)
+      setNotice(`Trip "${title}" added.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setTripsError(`Could not add this trip: ${error.message}`)
+    } finally {
+      setTripSaving(false)
+    }
+  }
+
+  const selectTripMedia = (event) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    const availableSlots = maxTripMedia - tripMediaPaths.length - tripMediaFiles.length
+    const acceptedFiles = []
+    let validationMessage = ''
+
+    for (const file of files) {
+      const isImage = file.type.startsWith('image/')
+      const isVideo = file.type.startsWith('video/')
+      if (!Object.hasOwn(tripMediaTypes, file.type)) {
+        validationMessage = 'Use JPEG, PNG, WebP, GIF, MP4, WebM, or MOV files.'
+      } else if (isImage && file.size > maxTripPhotoSize) {
+        validationMessage = 'Each photo must be 10 MB or smaller.'
+      } else if (isVideo && file.size > maxTripVideoSize) {
+        validationMessage = 'Each video must be 50 MB or smaller.'
+      } else if (acceptedFiles.length >= availableSlots) {
+        validationMessage = `You can attach up to ${maxTripMedia} memories to one trip.`
+      } else {
+        acceptedFiles.push({
+          file,
+          name: file.name,
+          type: file.type,
+          previewUrl: URL.createObjectURL(file),
+        })
+      }
+    }
+
+    setTripMediaFiles((current) => [...current, ...acceptedFiles])
+    setTripMediaError(validationMessage)
+  }
+
+  const saveTrip = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session || !selectedTrip) return
+
+    setTripMediaError('')
+    setTripSaving(true)
+    const uploadedPaths = []
+    try {
+      for (const item of tripMediaFiles) {
+        const path = `${session.user.id}/${selectedTrip.id}/${window.crypto.randomUUID()}.${tripMediaTypes[item.type]}`
+        const { error } = await supabase.storage
+          .from(tripMediaBucket)
+          .upload(path, item.file, { contentType: item.type, upsert: false })
+        if (error) throw error
+        uploadedPaths.push({ path, name: item.name, type: item.type })
+      }
+
+      const media = [...tripMediaPaths, ...uploadedPaths]
+      const { data, error } = await supabase
+        .from('trips')
+        .update({ trip_date: tripDate.trim(), notes: tripNotes, media, updated_at: new Date().toISOString() })
+        .eq('id', selectedTrip.id)
+        .eq('user_id', session.user.id)
+        .select('id, title, trip_date, notes, media, created_at')
+        .single()
+      if (error) throw error
+
+      const retainedPaths = new Set(media.map((item) => item.path))
+      const removedPaths = (Array.isArray(selectedTrip.media) ? selectedTrip.media : [])
+        .filter((item) => !retainedPaths.has(item.path))
+        .map((item) => item.path)
+      let cleanupNotice = ''
+      if (removedPaths.length) {
+        try {
+          const { error: removeError } = await supabase.storage.from(tripMediaBucket).remove(removedPaths)
+          if (removeError) cleanupNotice = ` Trip saved, but removed memory cleanup failed: ${removeError.message}`
+        } catch (removeError) {
+          cleanupNotice = ` Trip saved, but removed memory cleanup failed: ${removeError.message}`
+        }
+      }
+
+      tripMediaFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+      setTripMediaFiles([])
+      setTripMediaPaths(media)
+      setSelectedTrip(data)
+      setTrips((current) => current.map((trip) => trip.id === data.id ? data : trip))
+      setTripMediaLoading(true)
+      setNotice(`Trip "${data.title}" saved.${cleanupNotice}`)
+      window.setTimeout(() => setNotice(''), 5000)
+    } catch (error) {
+      let message = error.message
+      if (uploadedPaths.length) {
+        try {
+          const { error: cleanupError } = await supabase.storage.from(tripMediaBucket).remove(uploadedPaths.map((item) => item.path))
+          if (cleanupError) message += ` Uploaded memory cleanup failed: ${cleanupError.message}`
+        } catch (cleanupError) {
+          message += ` Uploaded memory cleanup failed: ${cleanupError.message}`
+        }
+      }
+      setTripMediaError(`Could not save this trip: ${message}`)
+    } finally {
+      setTripSaving(false)
+    }
+  }
+
+  const removeTripMemory = (path) => {
+    setTripMediaPaths((current) => current.filter((item) => item.path !== path))
+    setTripSignedMedia((current) => current.filter((item) => item.path !== path))
+    setTripCarouselIndex(0)
+  }
+
+  const closeIdeaNotes = () => {
+    businessNoteFiles.forEach((image) => URL.revokeObjectURL(image.previewUrl))
+    setBusinessNoteFiles([])
+    setSelectedIdea(null)
+  }
+
+  const selectBusinessNoteImages = (event) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    const availableSlots = maxBusinessImages - businessNoteImagePaths.length - businessNoteFiles.length
+    const acceptedFiles = []
+    let validationMessage = ''
+
+    for (const file of files) {
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+        validationMessage = 'Use JPEG, PNG, WebP, or GIF images.'
+      } else if (file.size > maxBusinessImageSize) {
+        validationMessage = 'Each image must be 5 MB or smaller.'
+      } else if (acceptedFiles.length >= availableSlots) {
+        validationMessage = `You can attach up to ${maxBusinessImages} images to one idea.`
+      } else {
+        acceptedFiles.push({ file, previewUrl: URL.createObjectURL(file) })
+      }
+    }
+
+    setBusinessNoteFiles((current) => [...current, ...acceptedFiles])
+    setBusinessImageError(validationMessage)
+  }
+
+  const saveBusinessNote = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session || !selectedIdea) return
+    const noteConfig = noteTableByType[selectedNoteType]
+    setBusinessNoteError('')
+    setBusinessImageError('')
+    setBusinessNoteSaving(true)
+
+    const uploadedPaths = []
+    try {
+      const extensionByType = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+      }
+
+      for (const image of businessNoteFiles) {
+        const path = `${session.user.id}/${noteConfig.pathPrefix}${selectedIdea.id}/${window.crypto.randomUUID()}.${extensionByType[image.file.type]}`
+        const { error } = await supabase.storage
+          .from(businessImageBucket)
+          .upload(path, image.file, { contentType: image.file.type, upsert: false })
+        if (error) throw error
+        uploadedPaths.push(path)
+      }
+
+      const imagePaths = [...businessNoteImagePaths, ...uploadedPaths]
+      const { error } = await supabase.from(noteConfig.table).upsert({
+        user_id: session.user.id,
+        [noteConfig.idColumn]: selectedIdea.id,
+        [noteConfig.titleColumn]: selectedIdea.title,
+        content: businessNote,
+        image_paths: imagePaths,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: `user_id,${noteConfig.idColumn}` })
+      if (error) throw error
+
+      const removedPaths = businessNoteInitialImagePaths.filter((path) => !imagePaths.includes(path))
+      let cleanupNotice = ''
+      if (removedPaths.length) {
+        try {
+          const { error: removeError } = await supabase.storage.from(businessImageBucket).remove(removedPaths)
+          if (removeError) cleanupNotice = ` Notes were saved, but removed image cleanup failed: ${removeError.message}`
+        } catch (removeError) {
+          cleanupNotice = ` Notes were saved, but removed image cleanup failed: ${removeError.message}`
+        }
+      }
+
+      setNotice(`Notes saved for ${selectedIdea.title}.${cleanupNotice}`)
+      window.setTimeout(() => setNotice(''), 5000)
+      closeIdeaNotes()
+    } catch (error) {
+      let message = error.message
+      if (uploadedPaths.length) {
+        try {
+          const { error: cleanupError } = await supabase.storage.from(businessImageBucket).remove(uploadedPaths)
+          if (cleanupError) message += ` Uploaded image cleanup failed: ${cleanupError.message}`
+        } catch (cleanupError) {
+          message += ` Uploaded image cleanup failed: ${cleanupError.message}`
+        }
+      }
+      setBusinessNoteError(`Could not save your notes: ${message}`)
+    } finally {
+      setBusinessNoteSaving(false)
+    }
+  }
+
+  const deleteIdea = async (idea) => {
+    if (!window.confirm(`Delete "${idea.title}" and all its saved notes? This cannot be undone.`)) return
+    if (!supabase || !session) {
+      setCloudError('Sign in to delete this business idea.')
+      return
+    }
+
+    setCloudError('')
+    setDeletingIdeaIds((current) => [...current, idea.id])
+    try {
+      const { data: note, error: loadError } = await supabase
+        .from('business_exploration_notes')
+        .select('image_paths')
+        .eq('user_id', session.user.id)
+        .eq('idea_id', idea.id)
+        .maybeSingle()
+      if (loadError) throw loadError
+
+      const { error } = await supabase
+        .from('business_exploration_notes')
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('idea_id', idea.id)
+      if (error) throw error
+
+      setIdeas((current) => current.filter((entry) => entry.id !== idea.id))
+      if (selectedIdea?.id === idea.id) closeIdeaNotes()
+
+      let cleanupNotice = ''
+      const imagePaths = Array.isArray(note?.image_paths)
+        ? note.image_paths.filter((path) => typeof path === 'string')
+        : []
+      if (imagePaths.length) {
+        try {
+          const { error: removeError } = await supabase.storage.from(businessImageBucket).remove(imagePaths)
+          if (removeError) cleanupNotice = ` The idea and notes were deleted, but image cleanup failed: ${removeError.message}`
+        } catch (removeError) {
+          cleanupNotice = ` The idea and notes were deleted, but image cleanup failed: ${removeError.message}`
+        }
+      }
+
+      setNotice(`Deleted "${idea.title}".${cleanupNotice}`)
+      window.setTimeout(() => setNotice(''), 5000)
+    } catch (error) {
+      setCloudError(`Could not delete "${idea.title}": ${error.message}`)
+    } finally {
+      setDeletingIdeaIds((current) => current.filter((id) => id !== idea.id))
+    }
+  }
+
   const addIdea = (event) => {
     event.preventDefault()
     const title = ideaTitle.trim()
     if (!title) return
-    setIdeas((current) => [{ title, category: 'Business exploration', note: ideaNote.trim() || 'A new thought to explore.', color: 'mint', stage: 'To explore', icon: 'spark' }, ...current])
+    setIdeas((current) => [{ id: window.crypto.randomUUID(), title, category: 'Business exploration', note: ideaNote.trim() || 'A new thought to explore.', color: 'mint', stage: 'To explore', icon: 'spark' }, ...current])
     setModalOpen(false)
     setNotice('Your idea has been added.')
     window.setTimeout(() => setNotice(''), 2600)
@@ -580,6 +1172,52 @@ function App() {
     }
   }
 
+  const deleteEmi = async (emi) => {
+    if (!window.confirm(`Delete "${emi.name}" monthly commitment? Its payment history will be kept.`)) return
+    if (!supabase || !session) return
+    setCloudError('')
+    setCloudLoading(true)
+    try {
+      const { error: linkError } = await supabase.from('money_entries').update({ emi_id: null }).eq('emi_id', emi.id)
+      if (linkError) throw linkError
+      const { error } = await supabase.from('emis').delete().eq('id', emi.id)
+      if (error) throw error
+      setEmis((current) => current.filter((entry) => entry.id !== emi.id))
+      setTransactions((current) => current.map((entry) => (
+        entry.emiId === emi.id ? { ...entry, emiId: '' } : entry
+      )))
+      setNotice('Monthly commitment deleted from Supabase.')
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCloudError(`Could not delete this monthly commitment from Supabase: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteCard = async (card) => {
+    if (!window.confirm(`Delete "${card.name}" credit card? Its payment history will be kept.`)) return
+    if (!supabase || !session) return
+    setCloudError('')
+    setCloudLoading(true)
+    try {
+      const { error: linkError } = await supabase.from('money_entries').update({ card_id: null }).eq('card_id', card.id)
+      if (linkError) throw linkError
+      const { error } = await supabase.from('cards').delete().eq('id', card.id)
+      if (error) throw error
+      setCards((current) => current.filter((entry) => entry.id !== card.id))
+      setTransactions((current) => current.map((entry) => (
+        entry.cardId === card.id ? { ...entry, cardId: '', cardName: '' } : entry
+      )))
+      setNotice('Credit card deleted from Supabase.')
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCloudError(`Could not delete this credit card from Supabase: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
   const toggleDay = (index) => {
     setCompletedDays((current) => current.includes(index)
       ? current.filter((day) => day !== index)
@@ -590,6 +1228,98 @@ function App() {
     setActivePage(page)
     setMenuOpen(false)
   }
+
+  const normalizedQuery = query.trim().toLowerCase()
+  const searchResults = normalizedQuery ? [
+    ...trips
+      .filter((trip) => `${trip.title} ${trip.trip_date || ''} ${trip.notes || ''}`.toLowerCase().includes(normalizedQuery)
+        || ['trip', 'trips', 'memory', 'memories'].includes(normalizedQuery))
+      .map((trip) => ({
+        key: `trip-${trip.id}`,
+        title: trip.title,
+        detail: trip.trip_date || 'Trip memory',
+        type: 'Trip',
+        onSelect: () => {
+          changePage('Personal & life')
+          setPersonalView('trips')
+          openTrip(trip)
+        },
+      })),
+    ...navItems
+      .filter((item) => item.id.toLowerCase().includes(normalizedQuery))
+      .map((item) => ({
+        key: `page-${item.id}`,
+        title: item.id,
+        detail: 'Open section',
+        type: 'Section',
+        onSelect: () => changePage(item.id),
+      })),
+    ...ideas
+      .filter((idea) => `${idea.title} ${idea.category} ${idea.note}`.toLowerCase().includes(normalizedQuery))
+      .map((idea) => ({
+        key: `idea-${idea.id}`,
+        title: idea.title,
+        detail: idea.category,
+        type: 'Idea',
+        onSelect: () => changePage('Business exploration'),
+      })),
+    ...goals
+      .filter((goal) => `${goal.title} ${goal.detail} ${goal.category}`.toLowerCase().includes(normalizedQuery))
+      .map((goal) => ({
+        key: `goal-${goal.title}`,
+        title: goal.title,
+        detail: goal.category,
+        type: 'Goal',
+        onSelect: () => {
+          if (goal.category === 'Personal & life') {
+            changePage('Personal & life')
+          } else {
+            changePage('Career & skills')
+          }
+        },
+      })),
+    ...transactions
+      .filter((entry) => `${entry.name} ${entry.reason || ''} ${entry.type} ${entry.category || ''} ${entry.cardName || ''} ${entry.amount || ''}`.toLowerCase().includes(normalizedQuery))
+      .map((entry) => ({
+        key: `entry-${entry.id}`,
+        title: entry.reason || entry.name,
+        detail: `${entry.category || entry.type} · ${entry.date}`,
+        type: 'Money',
+        onSelect: () => {
+          changePage('Money')
+          if (entry.date) {
+            setSelectedYear(Number(entry.date.slice(0, 4)))
+            setSelectedMonth(Number(entry.date.slice(5, 7)) - 1)
+          }
+        },
+      })),
+    ...cards
+      .filter((card) => `${card.name} ${card.bank || ''}`.toLowerCase().includes(normalizedQuery))
+      .map((card) => ({
+        key: `card-${card.id}`,
+        title: card.name,
+        detail: `${card.bank || 'Credit card'} · Credit card`,
+        type: 'Money',
+        onSelect: () => {
+          changePage('Money')
+          setSelectedYear(appDate.getFullYear())
+          setSelectedMonth(appDate.getMonth())
+        },
+      })),
+    ...emis
+      .filter((emi) => `${emi.name} ${emi.category || ''}`.toLowerCase().includes(normalizedQuery))
+      .map((emi) => ({
+        key: `emi-${emi.id}`,
+        title: emi.name,
+        detail: `${emi.category || 'Monthly commitment'} · EMI`,
+        type: 'Money',
+        onSelect: () => {
+          changePage('Money')
+          setSelectedYear(appDate.getFullYear())
+          setSelectedMonth(appDate.getMonth())
+        },
+      })),
+  ].slice(0, 8) : []
 
   const weekday = appDate.toLocaleDateString('en-US', { weekday: 'long' })
   const monthDay = appDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
@@ -688,14 +1418,47 @@ function App() {
           <button className="mobile-menu icon-button" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu" /></button>
           <div className="breadcrumb"><span>My workspace</span><Icon name="chevron" size={14} /><strong>{activePage}</strong></div>
           <div className="topbar-actions">
-            <label className="search-box">
-              <Icon name="search" size={17} />
-              <input aria-label="Search this workspace" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search anything..." />
-              <kbd>⌘ K</kbd>
-            </label>
+            <div className="search-container" ref={searchContainerRef}>
+              <div className="search-box">
+                <Icon name="search" size={17} />
+                <input ref={searchInputRef} aria-label="Search this workspace" aria-expanded={searchOpen} aria-controls="workspace-search-results" value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search anything..." />
+                {query && <button type="button" className="search-clear" aria-label="Clear search" onClick={() => { setQuery(''); searchInputRef.current?.focus(); setSearchOpen(true) }}><Icon name="close" size={13} /></button>}
+                <kbd>Ctrl K</kbd>
+              </div>
+              {searchOpen && <div className="search-results" id="workspace-search-results" role="listbox" aria-label="Workspace search results">
+                {!normalizedQuery
+                  ? <p className="search-empty-hint">Search ideas, goals, trips, payments, cards, or sections.</p>
+                  : searchResults.length
+                    ? searchResults.map((result) => <button type="button" className="search-result" role="option" aria-selected="false" key={result.key} onClick={() => { result.onSelect(); setQuery(''); setSearchOpen(false); searchInputRef.current?.blur() }}>
+                      <span className="search-result-icon"><Icon name={result.type === 'Money' ? 'wallet' : result.type === 'Section' ? 'grid' : result.type === 'Trip' ? 'spark' : result.type === 'Goal' ? 'heart' : 'lightbulb'} size={15} /></span>
+                      <span className="search-result-copy"><strong>{result.title}</strong><small>{result.detail}</small></span>
+                      <span className="search-result-type">{result.type}</span>
+                    </button>)
+                    : tripsError ? <div className="search-empty-hint search-trip-error" role="alert">{tripsError}<button type="button" onClick={() => { setTripsError(''); setTripsLoading(true); setTripsReload((count) => count + 1) }}>Retry trip search</button></div>
+                      : !tripsLoaded ? <p className="search-empty-hint" role="status">Loading your saved trips and other results…</p>
+                    : <p className="search-empty-hint">No matching items. Try another word.</p>}
+              </div>}
+            </div>
             <button className="icon-button notification-button" aria-label="Notifications"><Icon name="bell" size={18} /><i /></button>
-            <div className="top-avatar">S</div>
-            <button className="sign-out-button" onClick={signOut}>Sign out</button>
+            <div className="profile-menu-container" ref={profileContainerRef}>
+              <button className="top-avatar" aria-label="Account profile" aria-expanded={profileOpen} onClick={toggleProfile}>
+                {(profileUser?.user_metadata?.full_name || profileUser?.email || session.user.email || 'S').charAt(0).toUpperCase()}
+              </button>
+              {profileOpen && <section className="profile-popover" aria-label="Account details">
+                <div className="profile-popover-heading">
+                  <span className="profile-popover-avatar">{(profileUser?.user_metadata?.full_name || profileUser?.email || session.user.email || 'S').charAt(0).toUpperCase()}</span>
+                  <div><strong>{profileUser?.user_metadata?.full_name || profileUser?.user_metadata?.name || 'Your account'}</strong><span>{profileUser?.email || session.user.email}</span></div>
+                </div>
+                {profileLoading ? <p className="profile-popover-status" role="status">Loading your Supabase account details…</p>
+                  : profileError ? <p className="profile-popover-error" role="alert">{profileError}<button type="button" onClick={loadProfile}>Try again</button></p>
+                    : profileUser && <dl className="profile-details">
+                      <div><dt>User ID</dt><dd>{profileUser.id}</dd></div>
+                      <div><dt>Account created</dt><dd>{profileUser.created_at ? new Date(profileUser.created_at).toLocaleDateString() : 'Not available'}</dd></div>
+                      <div><dt>Last sign in</dt><dd>{profileUser.last_sign_in_at ? new Date(profileUser.last_sign_in_at).toLocaleString() : 'Not available'}</dd></div>
+                    </dl>}
+                <button type="button" className="profile-popover-signout" onClick={signOut}>Sign out</button>
+              </section>}
+            </div>
           </div>
         </header>
 
@@ -706,7 +1469,7 @@ function App() {
               <h1>{activePage === 'Overview' ? `${greeting}, Sankalp` : activePage}<span className="wave">{activePage === 'Overview' ? ' ✳' : ''}</span></h1>
               <p className="welcome-subtitle">{activePage === 'Overview' ? 'You’re building a life that feels like yours. Keep going.' : pageSubtitle(activePage)}</p>
             </div>
-            {activePage !== 'Money' && <button className="primary-button" onClick={openAddIdea}><Icon name="plus" size={17} /> New idea</button>}
+            {activePage !== 'Money' && !(activePage === 'Personal & life' && personalView === 'trips') && <button className="primary-button" onClick={openAddIdea}><Icon name="plus" size={17} /> New idea</button>}
             {activePage === 'Money' && selectedMonth !== null && !cloudDataLoading && !cloudLoadError && <button className="primary-button" onClick={() => openMoneyForm()}><Icon name="plus" size={17} /> Add entry</button>}
           </section>
 
@@ -821,7 +1584,7 @@ function App() {
                   {emis.map((emi) => {
                     const payments = monthTransactions.filter((entry) => entry.category === 'EMI payment' && entry.name === emi.name)
                     return <article className="commitment-item" key={emi.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>{formatMoney(Number(emi.amount))} / month · Due day {emi.dueDay || '—'}</span></div><button className="small-action" onClick={() => recordCommitmentPayment('EMI payment', emi)}>Log payment</button></div>
+                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>{formatMoney(Number(emi.amount))} / month · Due day {emi.dueDay || '—'}</span></div><button className="small-action" onClick={() => recordCommitmentPayment('EMI payment', emi)}>Log payment</button><button className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
                       <button className="commitment-add emi-calendar-button" onClick={() => downloadEmiCalendarReminder(emi)}>Download Google Calendar reminder (.ics)</button>
                       <div className="commitment-activity">{payments.length ? payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> Paid {formatMoney(Number(payment.amount))} on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>) : <span className="no-activity">No EMI payment logged for {monthNames[selectedMonth]}.</span>}</div>
                     </article>
@@ -834,7 +1597,7 @@ function App() {
                   {cardsWithBalances.map((card) => {
                     const payments = monthTransactions.filter((entry) => (entry.category === 'Credit card payment' || entry.category === 'Card repayment') && (entry.cardName === card.name || entry.name === card.name))
                     return <article className="commitment-item" key={card.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-card"><Icon name="card" size={16} /></span><div><strong>{card.name}</strong><span>{card.dueDay ? `Due day ${card.dueDay} · ` : ''}Balance {formatMoney(card.amount)}</span></div><button className="small-action" onClick={() => { setEntryName(card.name); setEntryReason(`Payment toward ${card.name} credit card`); setEntryAmount(String(card.amount || '')); setEntryType('Spending'); setEntryCategory('Card repayment'); setEntryCard(card.name); setEntryDate(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && selectedMonth === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`); setMoneyModalType('transaction'); setMoneyModalOpen(true) }}>Record repayment</button></div>
+                      <div className="commitment-row"><span className="commitment-icon commitment-card"><Icon name="card" size={16} /></span><div><strong>{card.name}</strong><span>{card.dueDay ? `Due day ${card.dueDay} · ` : ''}Balance {formatMoney(card.amount)}</span></div><button className="small-action" onClick={() => { setEntryName(card.name); setEntryReason(`Payment toward ${card.name} credit card`); setEntryAmount(String(card.amount || '')); setEntryType('Spending'); setEntryCategory('Card repayment'); setEntryCard(card.name); setEntryDate(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && selectedMonth === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`); setMoneyModalType('transaction'); setMoneyModalOpen(true) }}>Record repayment</button><button className="transaction-delete commitment-delete" aria-label={`Delete credit card: ${card.name}`} title="Delete credit card" disabled={cloudLoading} onClick={() => deleteCard(card)}><Icon name="trash" size={15} /></button></div>
                       <div className="commitment-activity">{payments.length ? payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> {payment.category}: {formatMoney(Number(payment.amount))} · {payment.reason}</span>) : <span className="no-activity">No card payment logged for {monthNames[selectedMonth]}.</span>}</div>
                     </article>
                   })}
@@ -847,18 +1610,111 @@ function App() {
             </>}
           </section>}
 
-          {(activePage === 'Career & skills' || activePage === 'Personal & life') && <section className="panel focus-panel">
+          {activePage === 'Personal & life' && personalView === 'goals' && <button type="button" className="panel trips-entry-panel" onClick={openTrips}>
+            <div><span className="section-kicker">MEMORIES TO KEEP</span><h2>Your trips</h2><p>Save a little note and the photos and videos you want to remember.</p></div>
+            <span className="primary-button"><Icon name="arrow" size={16} /> Open trips</span>
+          </button>}
+
+          {(activePage === 'Career & skills' || (activePage === 'Personal & life' && personalView === 'goals')) && <section className="panel focus-panel">
             <div className="section-heading"><div><span className="section-kicker">YOUR GOALS, AT YOUR PACE</span><h2>{activePage === 'Career & skills' ? 'Career & skills goals' : 'Personal & life goals'}</h2></div><span className="week-label">{goals.filter((goal) => goal.category === activePage).length} GOALS</span></div>
-            <p className="focus-intro">{activePage === 'Career & skills' ? 'Your learning goals, together in one place. Log a session whenever you make progress.' : 'Personal milestones deserve space too. Add notes and work through them at your own pace.'}</p>
+            <p className="focus-intro">{activePage === 'Career & skills' ? 'Your learning goals, together in one place. Log a session whenever you make progress.' : 'Personal milestones deserve space too. Open each goal to save private notes and images, and work through it at your own pace.'}</p>
             <div className="focus-goals">
-              {goals.map((goal, index) => ({ goal, index })).filter(({ goal }) => goal.category === activePage).map(({ goal, index }) => <article className="focus-goal-card" key={goal.title}><span className={`focus-goal-icon progress-${goal.color}`}><Icon name={activePage === 'Career & skills' ? 'book' : 'heart'} size={19} /></span><div className="focus-goal-content"><span className="section-kicker">{goal.category.toUpperCase()}</span><h3>{goal.title}</h3><p>{goal.detail}</p><div className="goal-title-row"><span>Progress</span><span>{goal.progress} / {goal.total} steps</span></div><div className="progress-track"><span className={`progress-${goal.color}`} style={{ width: `${(goal.progress / goal.total) * 100}%` }} /></div></div><button className="primary-button progress-button" onClick={() => toggleGoal(index)}><Icon name="plus" size={15} /> Log progress</button></article>)}
+              {goals.map((goal, index) => ({ goal, index })).filter(({ goal }) => goal.category === activePage).map(({ goal, index }) => <article
+                className={`focus-goal-card ${activePage === 'Personal & life' ? 'personal-goal-card' : ''}`}
+                key={goal.title}
+                onClick={activePage === 'Personal & life' ? () => openPersonalGoalNotes(goal) : undefined}
+                onKeyDown={activePage === 'Personal & life' ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    openPersonalGoalNotes(goal)
+                  }
+                } : undefined}
+                role={activePage === 'Personal & life' ? 'button' : undefined}
+                tabIndex={activePage === 'Personal & life' ? 0 : undefined}
+                aria-label={activePage === 'Personal & life' ? `Open notes for ${goal.title}` : undefined}
+              >
+                <span className={`focus-goal-icon progress-${goal.color}`}><Icon name={activePage === 'Career & skills' ? 'book' : 'heart'} size={19} /></span>
+                <div className="focus-goal-content">
+                  <span className="section-kicker">{goal.category.toUpperCase()}</span>
+                  <h3>{goal.title}</h3>
+                  <p>{goal.detail}</p>
+                  {activePage === 'Career & skills' && <>
+                    <div className="goal-title-row"><span>Progress</span><span>{goal.progress} / {goal.total} steps</span></div>
+                    <div className="progress-track"><span className={`progress-${goal.color}`} style={{ width: `${(goal.progress / goal.total) * 100}%` }} /></div>
+                  </>}
+                </div>
+                {activePage === 'Personal & life'
+                  ? <span className="notes-button progress-button"><Icon name="journal" size={15} /> Open notes</span>
+                  : <button className="primary-button progress-button" onClick={() => toggleGoal(index)}><Icon name="plus" size={15} /> Log progress</button>}
+              </article>)}
             </div>
+          </section>}
+
+          {activePage === 'Personal & life' && personalView === 'trips' && <section className="panel trips-panel">
+            {selectedTrip ? <>
+              <div className="section-heading trips-heading">
+                <div>
+                  <button className="trips-back-button" onClick={closeTrip}><Icon name="arrow" size={15} /> Back to trips</button>
+                  <span className="section-kicker">A TRIP TO REMEMBER</span>
+                  <h2>{selectedTrip.title}</h2>
+                </div>
+              </div>
+              <form className="trip-detail-form" onSubmit={saveTrip}>
+                <label htmlFor="trip-date">Trip date</label>
+                <input id="trip-date" type="text" maxLength={100} value={tripDate} onChange={(event) => setTripDate(event.target.value)} placeholder="e.g. 12–15 June 2026 or Summer 2026" disabled={tripSaving} />
+                <label htmlFor="trip-notes">A little note</label>
+                <textarea id="trip-notes" value={tripNotes} onChange={(event) => setTripNotes(event.target.value)} placeholder="A short note or favorite memory…" rows={3} maxLength={1000} disabled={tripSaving} />
+                <label htmlFor="trip-media">Photos & videos <span>PHOTOS UP TO 10 MB · VIDEOS UP TO 50 MB</span></label>
+                <input id="trip-media" className="trip-media-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" multiple onChange={selectTripMedia} disabled={tripSaving || tripMediaPaths.length + tripMediaFiles.length >= maxTripMedia} />
+                {tripMediaError && <p className="trip-error" role="alert">{tripMediaError}<button type="button" className="business-note-retry" onClick={() => { setTripMediaError(''); setTripMediaLoading(true); setTripMediaReload((count) => count + 1) }}>Try again</button></p>}
+                {tripMediaLoading && <div className="business-note-status" role="status">Loading trip memories…</div>}
+                {!tripMediaLoading && !tripMediaError && tripCarouselItems.length > 0 && <div className={`trip-carousel-view ${tripCarouselExpanded ? 'trip-carousel-view-expanded' : ''}`}>
+                  <div className="trip-carousel-toolbar">
+                    <span>{tripCarouselItems[tripCarouselIndex]?.name || `Memory ${tripCarouselIndex + 1} of ${tripCarouselItems.length}`}</span>
+                    <button type="button" className="trip-carousel-expand" onClick={() => setTripCarouselExpanded((expanded) => !expanded)}><Icon name={tripCarouselExpanded ? 'minimize' : 'maximize'} size={15} /> {tripCarouselExpanded ? 'Minimize' : 'Maximize'}</button>
+                  </div>
+                  <div className="trip-carousel" aria-label="Trip memories carousel">
+                  {tripCarouselItems[tripCarouselIndex]?.type.startsWith('video/')
+                    ? <video key={tripCarouselItems[tripCarouselIndex].url} src={tripCarouselItems[tripCarouselIndex].url} controls preload="metadata" />
+                    : <img key={tripCarouselItems[tripCarouselIndex].url} src={tripCarouselItems[tripCarouselIndex].url} alt={tripCarouselItems[tripCarouselIndex]?.name || `Memory ${tripCarouselIndex + 1} from ${selectedTrip.title}`} />}
+                  {tripCarouselItems.length > 1 && <>
+                    <button type="button" className="trip-carousel-control trip-carousel-previous" aria-label="Previous memory" onClick={() => setTripCarouselIndex((index) => (index - 1 + tripCarouselItems.length) % tripCarouselItems.length)}><Icon name="chevron" size={19} /></button>
+                    <button type="button" className="trip-carousel-control trip-carousel-next" aria-label="Next memory" onClick={() => setTripCarouselIndex((index) => (index + 1) % tripCarouselItems.length)}><Icon name="chevron" size={19} /></button>
+                    <span className="trip-carousel-count">{tripCarouselIndex + 1} / {tripCarouselItems.length}</span>
+                  </>}
+                  {tripCarouselItems[tripCarouselIndex]?.local
+                    ? <button type="button" className="trip-memory-remove" aria-label="Remove selected memory" disabled={tripSaving} onClick={() => { const item = tripCarouselItems[tripCarouselIndex]; URL.revokeObjectURL(item.previewUrl); setTripMediaFiles((current) => current.filter((file) => file.previewUrl !== item.previewUrl)); setTripCarouselIndex(0) }}><Icon name="trash" size={15} /></button>
+                    : <button type="button" className="trip-memory-remove" aria-label="Remove selected memory" disabled={tripSaving} onClick={() => removeTripMemory(tripCarouselItems[tripCarouselIndex].path)}><Icon name="trash" size={15} /></button>}
+                  {tripCarouselItems.length > 1 && <div className="trip-carousel-dots">{tripCarouselItems.map((item, index) => <button type="button" key={item.path || item.previewUrl} className={index === tripCarouselIndex ? 'trip-carousel-dot trip-carousel-dot-active' : 'trip-carousel-dot'} aria-label={`Show memory ${index + 1}`} onClick={() => setTripCarouselIndex(index)} />)}</div>}
+                  </div>
+                </div>}
+                {!tripMediaLoading && !tripMediaError && tripCarouselItems.length === 0 && <p className="trip-empty-media">Add photos or videos to see your trip memories here.</p>}
+                <button type="submit" className="primary-button trip-save-button" disabled={tripSaving}><Icon name="check" size={16} /> {tripSaving ? 'Saving trip…' : 'Save memories'}</button>
+              </form>
+            </> : <>
+              <div className="section-heading trips-heading">
+                <div>
+                  <button className="trips-back-button" onClick={() => setPersonalView('goals')}><Icon name="arrow" size={15} /> Back to Personal & life</button>
+                  <span className="section-kicker">MEMORIES TO KEEP</span>
+                  <h2>Trips <span className="heading-count">{trips.length}</span></h2>
+                </div>
+                <button className="primary-button" onClick={() => { setNewTripTitle(''); setNewTripDate(''); setTripsError(''); setAddTripOpen(true) }}><Icon name="plus" size={16} /> Add trip</button>
+              </div>
+              {tripsError && <p className="trip-error" role="alert">{tripsError}<button type="button" className="business-note-retry" onClick={() => { setTripsError(''); setTripsLoading(true); setTripsReload((count) => count + 1) }}>Try again</button></p>}
+              {tripsLoading ? <div className="business-note-status" role="status">Loading your trips…</div> : trips.length > 0
+                ? <div className="trip-list">{trips.map((trip) => <button type="button" className="trip-list-card" key={trip.id} onClick={() => openTrip(trip)}>
+                  <span className="trip-list-icon"><Icon name="journal" size={18} /></span>
+                  <span className="trip-list-copy"><strong>{trip.title}</strong><span>{trip.trip_date || trip.notes || `${Array.isArray(trip.media) ? trip.media.length : 0} photos or videos`}</span></span>
+                  <Icon name="chevron" size={18} />
+                </button>)}</div>
+                : <div className="trip-empty-state"><span className="trip-list-icon"><Icon name="journal" size={20} /></span><strong>No trips yet</strong><p>Add a trip to start collecting your notes, photos, and videos.</p><button className="primary-button" onClick={() => { setNewTripTitle(''); setNewTripDate(''); setAddTripOpen(true) }}><Icon name="plus" size={15} /> Add your first trip</button></div>}
+            </>}
           </section>}
 
           {activePage === 'Business exploration' && <section className="panel business-panel">
             <div className="section-heading"><div><span className="section-kicker">YOUR BUSINESS EXPLORATION</span><h2>Ideas to investigate <span className="heading-count">{ideas.length}</span></h2></div><button className="primary-button money-add-button" onClick={openAddIdea}><Icon name="plus" size={15} /> New business idea</button></div>
-            <p className="focus-intro">Keep each opportunity separate. Research the customer, local demand, startup costs, and a small way to test it before committing.</p>
-            <div className="business-idea-grid">{visibleIdeas.map((idea) => <article className="business-idea-card" key={`${idea.title}-${idea.note}`}><div className={`idea-icon idea-${idea.color}`}><Icon name={idea.icon} size={19} /></div><div className="business-idea-heading"><h3>{idea.title}</h3><span className="stage">{idea.stage}</span></div><p>{idea.note}</p><div className="research-checklist"><span><Icon name="check" size={13} /> Customer & demand</span><span><Icon name="check" size={13} /> Costs & first test</span></div></article>)}
+            <p className="focus-intro">Choose an idea to open its private R&D notes. Capture research, questions, points to explore, and supporting images in one place.</p>
+            <div className="business-idea-grid">{visibleIdeas.map((idea) => <article className="business-idea-card" key={idea.id || `${idea.title}-${idea.note}`}><button type="button" className="business-idea-open-card" onClick={() => openIdeaNotes(idea)} aria-label={`Open notes for ${idea.title}`}><div className={`idea-icon idea-${idea.color}`}><Icon name={idea.icon} size={19} /></div><div className="business-idea-heading"><h3>{idea.title}</h3><span className="stage">{idea.stage}</span></div><p>{idea.note}</p><span className="business-idea-open">Open research notes <Icon name="arrow" size={13} /></span></button><button type="button" className="transaction-delete business-idea-delete" aria-label={`Delete idea: ${idea.title}`} title="Delete idea" disabled={deletingIdeaIds.includes(idea.id)} onClick={() => deleteIdea(idea)}><Icon name="trash" size={15} /></button></article>)}
               {visibleIdeas.length === 0 && <div className="empty-state"><Icon name="search" size={22} /><strong>No business ideas found</strong><span>Try another search, or capture a fresh thought.</span></div>}
             </div>
           </section>}
@@ -871,11 +1727,13 @@ function App() {
               </div>
               <div className="ideas-list">
                 {visibleIdeas.slice(0, 3).map((idea) => (
-                  <article className="idea-row" key={`${idea.title}-${idea.note}`}>
-                    <div className={`idea-icon idea-${idea.color}`}><Icon name={idea.icon} size={19} /></div>
-                    <div className="idea-copy"><div className="idea-title-line"><h3>{idea.title}</h3><span className="stage">{idea.stage}</span></div><p>{idea.note}</p><div className="idea-meta"><span>{idea.category}</span></div></div>
-                    <button className="idea-open" aria-label={`Open ${idea.title}`} onClick={() => changePage('Business exploration')}><Icon name="chevron" size={17} /></button>
-                  </article>
+                <article className="idea-row" key={idea.id || `${idea.title}-${idea.note}`}>
+                <button type="button" className="idea-row-open" onClick={() => openIdeaNotes(idea)} aria-label={`Open notes for ${idea.title}`}>
+                  <div className={`idea-icon idea-${idea.color}`}><Icon name={idea.icon} size={19} /></div>
+                  <div className="idea-copy"><div className="idea-title-line"><h3>{idea.title}</h3><span className="stage">{idea.stage}</span></div><p>{idea.note}</p><div className="idea-meta"><span>{idea.category}</span></div></div>
+                  <span className="idea-open"><Icon name="chevron" size={17} /></span>
+                </button>
+                </article>
                 ))}
                 {visibleIdeas.length === 0 && <div className="empty-state"><Icon name="search" size={22} /><strong>No ideas found</strong><span>Try another search, or capture a fresh thought.</span></div>}
               </div>
@@ -936,6 +1794,29 @@ function App() {
           <button type="submit" className="primary-button modal-submit"><Icon name="plus" size={16} /> Save this idea</button>
         </form>
       </div>}
+      {selectedIdea && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !businessNoteSaving) closeIdeaNotes() }}>
+        <form className="idea-modal business-note-modal" onSubmit={saveBusinessNote}>
+          <button type="button" className="modal-close" onClick={closeIdeaNotes} aria-label="Close notes" disabled={businessNoteSaving}><Icon name="close" size={18} /></button>
+          <div className="modal-mark"><Icon name="journal" size={21} /></div>
+          <span className="section-kicker">{selectedNoteType === 'business' ? 'BUSINESS R&D NOTES' : 'PERSONAL & LIFE NOTES'}</span>
+          <h2>{selectedIdea.title}</h2>
+          <p>{selectedNoteType === 'business' ? 'Keep research, ideas, questions, and useful points for this opportunity together.' : 'Keep your reflections, plans, ideas, and useful points for this personal goal together.'} Notes and images are saved to your private account.</p>
+          {businessNoteLoading ? <div className="business-note-status" role="status">Loading your saved notes…</div> : businessNoteLoadError && <div className="business-note-error" role="alert">{businessNoteLoadError}<button type="button" className="business-note-retry" onClick={() => { setBusinessNoteLoadError(''); setBusinessNoteLoading(true); setBusinessNoteReload((count) => count + 1) }}>Try again</button></div>}
+          {!businessNoteLoading && !businessNoteLoadError && <>
+            {businessNoteError && <p className="business-note-error" role="alert">{businessNoteError}</p>}
+            <label htmlFor="business-note-content">Notes <span>PRIVATE TO YOUR ACCOUNT</span></label>
+            <textarea id="business-note-content" className="business-note-content" value={businessNote} onChange={(event) => setBusinessNote(event.target.value)} placeholder="Write your research, findings, ideas, questions, or next steps…" rows={10} maxLength={50000} disabled={businessNoteSaving} />
+            <label htmlFor="business-note-images">Images <span>UP TO {maxBusinessImages}, 5 MB EACH</span></label>
+            <input id="business-note-images" className="business-note-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={selectBusinessNoteImages} disabled={businessNoteSaving || businessNoteImagePaths.length + businessNoteFiles.length >= maxBusinessImages} />
+            {businessImageError && <p className="business-note-image-error" role="alert">{businessImageError}</p>}
+            {(businessNoteImages.length > 0 || businessNoteFiles.length > 0) && <div className="business-note-image-grid">
+              {businessNoteImages.map((image) => <div className="business-note-image" key={image.path}><a href={image.url} target="_blank" rel="noreferrer"><img src={image.url} alt={`Attachment for ${selectedIdea.title}`} /></a><button type="button" onClick={() => { setBusinessNoteImages((current) => current.filter((entry) => entry.path !== image.path)); setBusinessNoteImagePaths((current) => current.filter((path) => path !== image.path)) }} aria-label="Remove attached image" disabled={businessNoteSaving}><Icon name="close" size={14} /></button></div>)}
+              {businessNoteFiles.map((image) => <div className="business-note-image" key={image.previewUrl}><img src={image.previewUrl} alt={`New attachment for ${selectedIdea.title}`} /><button type="button" onClick={() => { URL.revokeObjectURL(image.previewUrl); setBusinessNoteFiles((current) => current.filter((entry) => entry.previewUrl !== image.previewUrl)) }} aria-label="Remove selected image" disabled={businessNoteSaving}><Icon name="close" size={14} /></button></div>)}
+            </div>}
+            <button type="submit" className="primary-button modal-submit" disabled={businessNoteSaving}><Icon name="check" size={16} /> {businessNoteSaving ? 'Saving notes…' : 'Save notes'}</button>
+          </>}
+        </form>
+      </div>}
       {moneyModalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setMoneyModalOpen(false) }}>
         <form className="idea-modal money-modal" onSubmit={saveMoneyEntry}>
           <button type="button" className="modal-close" onClick={() => setMoneyModalOpen(false)} aria-label="Close"><Icon name="close" size={18} /></button>
@@ -970,6 +1851,21 @@ function App() {
           <button type="submit" className="primary-button modal-submit"><Icon name="check" size={16} /> {moneyModalType === 'transaction' ? editingTransactionId ? 'Save changes' : 'Save entry' : moneyModalType === 'emi' ? 'Save EMI reminder' : 'Save card'}</button>
         </form>
       </div>}
+      {addTripOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !tripSaving) setAddTripOpen(false) }}>
+        <form className="idea-modal trip-create-modal" onSubmit={createTrip}>
+          <button type="button" className="modal-close" onClick={() => setAddTripOpen(false)} aria-label="Close" disabled={tripSaving}><Icon name="close" size={18} /></button>
+          <div className="modal-mark"><Icon name="journal" size={21} /></div>
+          <span className="section-kicker">A NEW MEMORY</span>
+          <h2>Add a trip</h2>
+          <p>Give your trip a name and add its date. You can add notes, photos, and videos after opening it.</p>
+          <label htmlFor="trip-title">Trip name</label>
+          <input id="trip-title" autoFocus maxLength={100} value={newTripTitle} onChange={(event) => setNewTripTitle(event.target.value)} placeholder="e.g. Weekend in Goa" required disabled={tripSaving} />
+          <label htmlFor="new-trip-date">Trip date <span>OPTIONAL</span></label>
+          <input id="new-trip-date" type="text" maxLength={100} value={newTripDate} onChange={(event) => setNewTripDate(event.target.value)} placeholder="e.g. 12–15 June 2026 or Summer 2026" disabled={tripSaving} />
+          {tripsError && <p className="trip-error" role="alert">{tripsError}</p>}
+          <button type="submit" className="primary-button modal-submit" disabled={tripSaving}><Icon name="plus" size={16} /> {tripSaving ? 'Adding trip…' : 'Add trip'}</button>
+        </form>
+      </div>}
     </div>
   )
 }
@@ -977,7 +1873,7 @@ function App() {
 function pageSubtitle(page) {
   const descriptions = {
     'Career & skills': 'Build a steady path through technical learning and communication skills.',
-    'Personal & life': 'Keep important life plans and milestones in one calm, private space.',
+    'Personal & life': 'Keep your personal goals and trip memories together in one calm, private space.',
     'Business exploration': 'Explore clothing, PG, event management, and water bottle business ideas.',
     Money: 'Track income, spending, EMIs, card purchases, and repayments together.',
     Journal: 'A private place to notice, reflect, and remember.',
