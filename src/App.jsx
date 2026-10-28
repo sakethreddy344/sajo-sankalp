@@ -188,10 +188,20 @@ function Icon({ name, size = 18, className = '' }) {
 function App() {
   const [activePage, setActivePage] = useState('Overview')
   const [ideas, setIdeas] = usePersistentState('daymark-ideas', initialIdeas)
-  const [goals, setGoals] = usePersistentState('daymark-goals', initialGoals)
+  const [goals] = usePersistentState('daymark-goals', initialGoals)
+  const [selectedCareerGoal, setSelectedCareerGoal] = useState('')
+  const [careerTopics, setCareerTopics] = useState([])
+  const [careerTopicsLoading, setCareerTopicsLoading] = useState(false)
+  const [careerTopicsError, setCareerTopicsError] = useState('')
+  const [careerTopicsReload, setCareerTopicsReload] = useState(0)
+  const [selectedCareerTopicId, setSelectedCareerTopicId] = useState('')
+  const [careerTopicNotes, setCareerTopicNotes] = useState('')
+  const [newCareerTopicTitle, setNewCareerTopicTitle] = useState('')
+  const [careerTopicSaving, setCareerTopicSaving] = useState(false)
   const [transactions, setTransactions] = useState([])
   const [emis, setEmis] = useState([])
   const [cards, setCards] = useState([])
+  const [availableCards, setAvailableCards] = useState([])
   const [completedDays, setCompletedDays] = usePersistentState('daymark-habits', [])
   const [selectedYear, setSelectedYear] = useState(appDate.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(null)
@@ -239,6 +249,7 @@ function App() {
   const [tripsLoaded, setTripsLoaded] = useState(false)
   const [tripsError, setTripsError] = useState('')
   const [tripsReload, setTripsReload] = useState(0)
+  const [deletingTripIds, setDeletingTripIds] = useState([])
   const [addTripOpen, setAddTripOpen] = useState(false)
   const [newTripTitle, setNewTripTitle] = useState('')
   const [newTripDate, setNewTripDate] = useState('')
@@ -263,10 +274,12 @@ function App() {
   const [entryCard, setEntryCard] = useState('')
   const [entryDueDay, setEntryDueDay] = useState('')
   const [entryDueDate, setEntryDueDate] = useState(dateInputValue(appDate))
+  const [availableCardName, setAvailableCardName] = useState('')
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef(null)
   const searchContainerRef = useRef(null)
+  const authUserIdRef = useRef('')
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState('')
@@ -291,6 +304,14 @@ function App() {
       .finally(() => setAuthLoading(false))
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      const nextUserId = nextSession?.user.id || ''
+      if (authUserIdRef.current && authUserIdRef.current !== nextUserId) {
+        setCareerTopics([])
+        setSelectedCareerGoal('')
+        setSelectedCareerTopicId('')
+        setCareerTopicNotes('')
+      }
+      authUserIdRef.current = nextUserId
       setSession(nextSession)
       setAuthLoading(false)
       setCloudError('')
@@ -315,6 +336,11 @@ function App() {
     const channel = supabase
       .channel(`money-data:${userId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards', filter: `user_id=eq.${userId}` }, refreshData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'available_credit_cards', filter: `user_id=eq.${userId}` }, refreshData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'career_skill_topics', filter: `user_id=eq.${userId}` }, () => {
+        setCareerTopicsLoading(true)
+        setCareerTopicsReload((count) => count + 1)
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'emis', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'money_entries', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trips', filter: `user_id=eq.${userId}` }, () => setTripsReload((count) => count + 1))
@@ -336,6 +362,39 @@ function App() {
       supabase.removeChannel(channel)
     }
   }, [session])
+
+  useEffect(() => {
+    if (!session || !supabase || !selectedCareerGoal) return undefined
+
+    let active = true
+
+    supabase
+      .from('career_skill_topics')
+      .select('id, goal_title, parent_id, title, notes, created_at, updated_at')
+      .eq('user_id', session.user.id)
+      .eq('goal_title', selectedCareerGoal)
+      .order('created_at')
+      .then(({ data, error }) => {
+        if (error) throw error
+        if (!active) return
+        setCareerTopics(data)
+        setCareerTopicsError('')
+        if (selectedCareerTopicId && !data.some((topic) => topic.id === selectedCareerTopicId)) {
+          setSelectedCareerTopicId('')
+          setCareerTopicNotes('')
+        }
+      })
+      .catch((error) => {
+        if (active) setCareerTopicsError(`Could not load your topics: ${error.message}`)
+      })
+      .finally(() => {
+        if (active) setCareerTopicsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [session, selectedCareerGoal, careerTopicsReload, selectedCareerTopicId])
 
   useEffect(() => {
     if (!session || !supabase) return undefined
@@ -362,18 +421,20 @@ function App() {
         throw new Error(`Could not preserve your existing browser-only finance records: ${error.message}`)
       }
 
-      const [cardResult, emiResult, entryResult] = await Promise.all([
+      const [cardResult, availableCardResult, emiResult, entryResult] = await Promise.all([
         supabase.from('cards').select('*').order('created_at'),
+        supabase.from('available_credit_cards').select('id, name, created_at').order('created_at'),
         supabase.from('emis').select('*').order('created_at'),
         supabase.from('money_entries').select('*').order('entry_date', { ascending: false }),
       ])
-      const failedResult = [cardResult, emiResult, entryResult].find((result) => result.error)
+      const failedResult = [cardResult, availableCardResult, emiResult, entryResult].find((result) => result.error)
       if (failedResult?.error) throw failedResult.error
       if (!active) return
 
       const loadedCards = cardResult.data.map(fromCardRow)
       const loadedEntries = entryResult.data.map((row) => fromMoneyEntryRow(row, loadedCards))
       setCards(loadedCards)
+      setAvailableCards(availableCardResult.data)
       setEmis(emiResult.data.map(fromEmiRow))
       setTransactions(loadedEntries)
       setCloudNotice('')
@@ -781,6 +842,54 @@ function App() {
     }
   }
 
+  const deleteTrip = async (trip) => {
+    if (!window.confirm(`Delete "${trip.title}" and all its saved memories? This cannot be undone.`)) return
+    if (!supabase || !session) {
+      setTripsError('Sign in to delete this trip.')
+      return
+    }
+
+    setTripsError('')
+    setDeletingTripIds((current) => [...current, trip.id])
+    try {
+      const { error } = await supabase
+        .from('trips')
+        .delete()
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .select('id')
+        .single()
+      if (error) throw error
+
+      setTrips((current) => current.filter((entry) => entry.id !== trip.id))
+      if (selectedTrip?.id === trip.id) closeTrip()
+
+      const mediaPaths = (Array.isArray(trip.media) ? trip.media : [])
+        .map((item) => item?.path)
+        .filter((path) => typeof path === 'string' && path.length > 0)
+      let cleanupError = ''
+      if (mediaPaths.length) {
+        try {
+          const { error: removeError } = await supabase.storage.from(tripMediaBucket).remove(mediaPaths)
+          if (removeError) cleanupError = removeError.message
+        } catch (error) {
+          cleanupError = error.message
+        }
+      }
+
+      if (cleanupError) {
+        setTripsError(`Trip "${trip.title}" was deleted, but its saved memories could not be removed from storage: ${cleanupError}`)
+      } else {
+        setNotice(`Trip "${trip.title}" and its memories were deleted.`)
+        window.setTimeout(() => setNotice(''), 2600)
+      }
+    } catch (error) {
+      setTripsError(`Could not delete trip "${trip.title}": ${error.message}`)
+    } finally {
+      setDeletingTripIds((current) => current.filter((id) => id !== trip.id))
+    }
+  }
+
   const selectTripMedia = (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
@@ -1040,12 +1149,139 @@ function App() {
     window.setTimeout(() => setNotice(''), 2600)
   }
 
-  const toggleGoal = (index) => {
-    setGoals((current) => current.map((goal, goalIndex) => (
-      goalIndex === index
-        ? { ...goal, progress: Math.min(goal.total, goal.progress + 1) }
-        : goal
-    )))
+  const openCareerGoal = (goal) => {
+    setActivePage('Career & skills')
+    setSelectedCareerGoal(goal.title)
+    setSelectedCareerTopicId('')
+    setCareerTopicNotes('')
+    setNewCareerTopicTitle('')
+    setCareerTopics([])
+    setCareerTopicsError('')
+    setCareerTopicsLoading(true)
+  }
+
+  const closeCareerGoal = () => {
+    const topic = careerTopics.find((item) => item.id === selectedCareerTopicId)
+    if (topic && topic.notes !== careerTopicNotes && !window.confirm('Discard your unsaved notes and go back?')) return
+    setSelectedCareerGoal('')
+    setSelectedCareerTopicId('')
+    setCareerTopicNotes('')
+    setNewCareerTopicTitle('')
+    setCareerTopicsError('')
+  }
+
+  const selectCareerTopic = (topic) => {
+    const currentTopic = careerTopics.find((item) => item.id === selectedCareerTopicId)
+    if (currentTopic && currentTopic.id !== topic.id && currentTopic.notes !== careerTopicNotes && !window.confirm('Discard your unsaved notes and open another topic?')) return
+    setSelectedCareerTopicId(topic.id)
+    setCareerTopicNotes(topic.notes || '')
+    setCareerTopicsError('')
+  }
+
+  const showAllCareerTopics = () => {
+    const currentTopic = careerTopics.find((item) => item.id === selectedCareerTopicId)
+    if (currentTopic && currentTopic.notes !== careerTopicNotes && !window.confirm('Discard your unsaved notes and go back to all topics?')) return
+    setSelectedCareerTopicId('')
+    setCareerTopicNotes('')
+  }
+
+  const addCareerTopic = async (event) => {
+    event.preventDefault()
+    const title = newCareerTopicTitle.trim()
+    if (!title || !selectedCareerGoal || !supabase || !session) return
+    const currentTopic = careerTopics.find((item) => item.id === selectedCareerTopicId)
+    if (currentTopic && currentTopic.notes !== careerTopicNotes && !window.confirm('Discard your unsaved notes and add a subtopic?')) return
+
+    setCareerTopicsError('')
+    setCareerTopicSaving(true)
+    try {
+      const { data, error } = await supabase
+        .from('career_skill_topics')
+        .insert({
+          user_id: session.user.id,
+          goal_title: selectedCareerGoal,
+          parent_id: selectedCareerTopicId || null,
+          title,
+        })
+        .select('id, goal_title, parent_id, title, notes, created_at, updated_at')
+        .single()
+      if (error) throw error
+      setCareerTopics((current) => [...current, data])
+      setSelectedCareerTopicId(data.id)
+      setCareerTopicNotes('')
+      setNewCareerTopicTitle('')
+      setNotice(`Added "${title}".`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCareerTopicsError(`Could not add this topic: ${error.message}`)
+    } finally {
+      setCareerTopicSaving(false)
+    }
+  }
+
+  const saveCareerTopicNotes = async (event) => {
+    event.preventDefault()
+    const topic = careerTopics.find((item) => item.id === selectedCareerTopicId)
+    if (!topic || !supabase || !session) return
+
+    setCareerTopicsError('')
+    setCareerTopicSaving(true)
+    try {
+      const { data, error } = await supabase
+        .from('career_skill_topics')
+        .update({ notes: careerTopicNotes, updated_at: new Date().toISOString() })
+        .eq('id', topic.id)
+        .eq('user_id', session.user.id)
+        .select('id, goal_title, parent_id, title, notes, created_at, updated_at')
+        .single()
+      if (error) throw error
+      setCareerTopics((current) => current.map((item) => item.id === data.id ? data : item))
+      setNotice('Notes saved.')
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCareerTopicsError(`Could not save these notes: ${error.message}`)
+    } finally {
+      setCareerTopicSaving(false)
+    }
+  }
+
+  const deleteCareerTopic = async (topic) => {
+    if (!window.confirm(`Delete "${topic.title}" and all its subtopics? This cannot be undone.`)) return
+    if (!supabase || !session) return
+
+    setCareerTopicsError('')
+    setCareerTopicSaving(true)
+    try {
+      const descendantIds = new Set([topic.id])
+      let foundNewDescendant = true
+      while (foundNewDescendant) {
+        foundNewDescendant = false
+        careerTopics.forEach((item) => {
+          if (descendantIds.has(item.parent_id) && !descendantIds.has(item.id)) {
+            descendantIds.add(item.id)
+            foundNewDescendant = true
+          }
+        })
+      }
+
+      const { error } = await supabase
+        .from('career_skill_topics')
+        .delete()
+        .eq('id', topic.id)
+        .eq('user_id', session.user.id)
+      if (error) throw error
+      setCareerTopics((current) => current.filter((item) => !descendantIds.has(item.id)))
+      if (descendantIds.has(selectedCareerTopicId)) {
+        setSelectedCareerTopicId('')
+        setCareerTopicNotes('')
+      }
+      setNotice(`Deleted "${topic.title}" and its subtopics.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCareerTopicsError(`Could not delete this topic: ${error.message}`)
+    } finally {
+      setCareerTopicSaving(false)
+    }
   }
 
   const openMoneyForm = (type = 'transaction') => {
@@ -1218,6 +1454,58 @@ function App() {
     }
   }
 
+  const addAvailableCard = async (event) => {
+    event.preventDefault()
+    const name = availableCardName.trim()
+    if (!name || !supabase || !session) return
+    if (availableCards.some((card) => card.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      setCloudError(`"${name}" is already in your available credit cards.`)
+      return
+    }
+
+    setCloudError('')
+    setCloudLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('available_credit_cards')
+        .insert({ user_id: session.user.id, name })
+        .select('id, name, created_at')
+        .single()
+      if (error) throw error
+      setAvailableCards((current) => [...current, data])
+      setAvailableCardName('')
+      setNotice(`Added "${name}" to your available credit cards.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCloudError(`Could not add this available credit card: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteAvailableCard = async (card) => {
+    if (!window.confirm(`Remove "${card.name}" from your available credit cards?`)) return
+    if (!supabase || !session) return
+
+    setCloudError('')
+    setCloudLoading(true)
+    try {
+      const { error } = await supabase
+        .from('available_credit_cards')
+        .delete()
+        .eq('id', card.id)
+        .eq('user_id', session.user.id)
+      if (error) throw error
+      setAvailableCards((current) => current.filter((entry) => entry.id !== card.id))
+      setNotice(`Removed "${card.name}" from your available credit cards.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCloudError(`Could not remove this available credit card: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
   const toggleDay = (index) => {
     setCompletedDays((current) => current.includes(index)
       ? current.filter((day) => day !== index)
@@ -1325,6 +1613,26 @@ function App() {
   const monthDay = appDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
   const greeting = appDate.getHours() < 12 ? 'Good morning' : appDate.getHours() < 18 ? 'Good afternoon' : 'Good evening'
   const formatMoney = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', currencyDisplay: 'symbol', maximumFractionDigits: 0 }).format(amount)
+  const careerGoalItems = goals.filter((goal) => goal.category === 'Career & skills')
+  const selectedCareerTopic = careerTopics.find((topic) => topic.id === selectedCareerTopicId) || null
+  const careerTopicChildren = (parentId) => careerTopics
+    .filter((topic) => topic.goal_title === selectedCareerGoal && topic.parent_id === parentId)
+    .sort((left, right) => left.created_at.localeCompare(right.created_at))
+  const renderCareerTopicTree = (parentId = null) => {
+    const children = careerTopicChildren(parentId)
+    if (!children.length) return null
+
+    return <ul className="career-topic-tree">{children.map((topic) => (
+      <li key={topic.id}>
+        <div className={`career-topic-row ${selectedCareerTopicId === topic.id ? 'career-topic-row-selected' : ''}`}>
+          <button type="button" className="career-topic-select" onClick={() => selectCareerTopic(topic)} aria-current={selectedCareerTopicId === topic.id ? 'page' : undefined}>{topic.title}</button>
+          <button type="button" className="career-topic-go" onClick={() => selectCareerTopic(topic)}>Go</button>
+          <button type="button" className="transaction-delete career-topic-delete" aria-label={`Delete ${topic.title} and its subtopics`} title="Delete topic" disabled={careerTopicSaving} onClick={() => deleteCareerTopic(topic)}><Icon name="trash" size={14} /></button>
+        </div>
+        {renderCareerTopicTree(topic.id)}
+      </li>
+    ))}</ul>
+  }
 
   if (!supabaseConfigured || authLoading || !session || authMode === 'recovery') {
     return (
@@ -1556,6 +1864,7 @@ function App() {
             </div>
 
             <div className="money-content-grid">
+              <div className="money-left-column">
               <section className="panel money-transactions-panel">
                 <div className="section-heading"><div><span className="section-kicker">{monthNames[selectedMonth].toUpperCase()} {selectedYear} · INCOME & SPENDING</span><h2>Monthly entries <span className="heading-count">{monthTransactions.length}</span></h2></div><button className="primary-button money-add-button" onClick={() => openMoneyForm()}><Icon name="plus" size={15} /> Add entry</button></div>
                 <div className="money-filter-row">
@@ -1577,6 +1886,17 @@ function App() {
                 </div>
                 <div className="money-note"><Icon name="lock" size={14} /> Your entries are stored in Supabase. Other signed-in sessions update live when Realtime is enabled.</div>
               </section>
+              <section className="panel commitment-panel available-cards-panel">
+                <div className="section-heading"><div><span className="section-kicker">AVAILABLE CREDIT CARDS</span><h2>Credit cards available <span className="heading-count">{availableCards.length}</span></h2></div></div>
+                <form className="available-card-form" onSubmit={addAvailableCard}>
+                  <input aria-label="Available credit card name" maxLength={100} value={availableCardName} onChange={(event) => setAvailableCardName(event.target.value)} placeholder="Enter a card name" required />
+                  <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name="plus" size={14} /> Add</button>
+                </form>
+                {availableCards.length > 0
+                  ? <ul className="available-card-list">{availableCards.map((card) => <li key={card.id}><Icon name="card" size={15} /><span>{card.name}</span><button className="transaction-delete available-card-delete" type="button" aria-label={`Remove ${card.name} from available credit cards`} title="Remove card" disabled={cloudLoading} onClick={() => deleteAvailableCard(card)}><Icon name="trash" size={15} /></button></li>)}</ul>
+                  : <p className="commitment-empty">Add the names of all your available cards here. This list is separate from cards used for payment tracking.</p>}
+              </section>
+              </div>
 
               <div className="commitments-column">
                 <section className="panel commitment-panel">
@@ -1593,7 +1913,7 @@ function App() {
                   <button className="commitment-add" onClick={() => openMoneyForm('emi')}><Icon name="plus" size={14} /> Add current EMI</button>
                 </section>
                 <section className="panel commitment-panel">
-                  <div className="section-heading"><div><span className="section-kicker">CARDS & REPAYMENTS</span><h2>Credit cards <span className="heading-count">{cards.length}</span></h2></div><button className="round-arrow" aria-label="Add credit card" onClick={() => openMoneyForm('card')}><Icon name="plus" size={16} /></button></div>
+                  <div className="section-heading"><div><span className="section-kicker">CARDS & REPAYMENTS</span><h2>Card tracking <span className="heading-count">{cards.length}</span></h2></div><button className="round-arrow" aria-label="Add credit card" onClick={() => openMoneyForm('card')}><Icon name="plus" size={16} /></button></div>
                   {cardsWithBalances.map((card) => {
                     const payments = monthTransactions.filter((entry) => (entry.category === 'Credit card payment' || entry.category === 'Card repayment') && (entry.cardName === card.name || entry.name === card.name))
                     return <article className="commitment-item" key={card.id}>
@@ -1615,37 +1935,82 @@ function App() {
             <span className="primary-button"><Icon name="arrow" size={16} /> Open trips</span>
           </button>}
 
-          {(activePage === 'Career & skills' || (activePage === 'Personal & life' && personalView === 'goals')) && <section className="panel focus-panel">
-            <div className="section-heading"><div><span className="section-kicker">YOUR GOALS, AT YOUR PACE</span><h2>{activePage === 'Career & skills' ? 'Career & skills goals' : 'Personal & life goals'}</h2></div><span className="week-label">{goals.filter((goal) => goal.category === activePage).length} GOALS</span></div>
-            <p className="focus-intro">{activePage === 'Career & skills' ? 'Your learning goals, together in one place. Log a session whenever you make progress.' : 'Personal milestones deserve space too. Open each goal to save private notes and images, and work through it at your own pace.'}</p>
+          {activePage === 'Career & skills' && !selectedCareerGoal && <section className="panel focus-panel">
+            <div className="section-heading"><div><span className="section-kicker">YOUR GOALS, AT YOUR PACE</span><h2>Career & skills</h2></div><span className="week-label">{careerGoalItems.length} TOPICS</span></div>
+            <p className="focus-intro">Choose a learning area to open its workspace. Add topics, nest subtopics, and keep notes for each one.</p>
             <div className="focus-goals">
-              {goals.map((goal, index) => ({ goal, index })).filter(({ goal }) => goal.category === activePage).map(({ goal, index }) => <article
-                className={`focus-goal-card ${activePage === 'Personal & life' ? 'personal-goal-card' : ''}`}
-                key={goal.title}
-                onClick={activePage === 'Personal & life' ? () => openPersonalGoalNotes(goal) : undefined}
-                onKeyDown={activePage === 'Personal & life' ? (event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    openPersonalGoalNotes(goal)
-                  }
-                } : undefined}
-                role={activePage === 'Personal & life' ? 'button' : undefined}
-                tabIndex={activePage === 'Personal & life' ? 0 : undefined}
-                aria-label={activePage === 'Personal & life' ? `Open notes for ${goal.title}` : undefined}
-              >
-                <span className={`focus-goal-icon progress-${goal.color}`}><Icon name={activePage === 'Career & skills' ? 'book' : 'heart'} size={19} /></span>
-                <div className="focus-goal-content">
+              {careerGoalItems.map((goal) => <button type="button" className="focus-goal-card career-goal-card" key={goal.title} onClick={() => openCareerGoal(goal)}>
+                <span className={`focus-goal-icon progress-${goal.color}`}><Icon name="book" size={19} /></span>
+                <span className="focus-goal-content">
                   <span className="section-kicker">{goal.category.toUpperCase()}</span>
-                  <h3>{goal.title}</h3>
-                  <p>{goal.detail}</p>
-                  {activePage === 'Career & skills' && <>
-                    <div className="goal-title-row"><span>Progress</span><span>{goal.progress} / {goal.total} steps</span></div>
-                    <div className="progress-track"><span className={`progress-${goal.color}`} style={{ width: `${(goal.progress / goal.total) * 100}%` }} /></div>
-                  </>}
-                </div>
-                {activePage === 'Personal & life'
-                  ? <span className="notes-button progress-button"><Icon name="journal" size={15} /> Open notes</span>
-                  : <button className="primary-button progress-button" onClick={() => toggleGoal(index)}><Icon name="plus" size={15} /> Log progress</button>}
+                  <strong>{goal.title}</strong>
+                  <span>{goal.detail}</span>
+                </span>
+                <span className="primary-button career-goal-open"><Icon name="arrow" size={15} /> Go</span>
+              </button>)}
+            </div>
+          </section>}
+
+          {activePage === 'Career & skills' && selectedCareerGoal && <section className="career-workspace">
+            <header className="panel career-workspace-header">
+              <button type="button" className="trips-back-button" onClick={closeCareerGoal}><Icon name="arrow" size={15} /> Back to Career & skills</button>
+              <span className="section-kicker">LEARNING WORKSPACE</span>
+              <h2>{selectedCareerGoal}</h2>
+            </header>
+            {careerTopicsError && <p className="cloud-inline-error" role="alert">{careerTopicsError}<button type="button" className="business-note-retry" onClick={() => { setCareerTopicsError(''); setCareerTopicsLoading(true); setCareerTopicsReload((count) => count + 1) }}>Try again</button></p>}
+            <div className="career-workspace-grid">
+              <aside className="panel career-topic-sidebar">
+                <div className="section-heading"><div><span className="section-kicker">YOUR LEARNING PATH</span><h2>Subtopics <span className="heading-count">{careerTopics.filter((topic) => topic.goal_title === selectedCareerGoal).length}</span></h2></div></div>
+                <button type="button" className={`career-all-topics ${selectedCareerTopicId ? '' : 'career-all-topics-selected'}`} onClick={showAllCareerTopics}>All topics in this goal</button>
+                {careerTopicsLoading
+                  ? <div className="business-note-status" role="status">Loading your topics…</div>
+                  : careerGoalItems.length > 0 && renderCareerTopicTree()}
+                {!careerTopicsLoading && careerTopics.length === 0 && !careerTopicsError && <p className="career-topics-empty">No topics yet. Add your first topic below.</p>}
+                <form className="career-topic-add-form" onSubmit={addCareerTopic}>
+                  <label htmlFor="career-topic-title">{selectedCareerTopic ? `Add a subtopic under “${selectedCareerTopic.title}”` : 'Add a topic under this goal'}</label>
+                  <input id="career-topic-title" maxLength={100} value={newCareerTopicTitle} onChange={(event) => setNewCareerTopicTitle(event.target.value)} placeholder={selectedCareerTopic ? 'Enter a subtopic' : 'Enter a topic'} required disabled={careerTopicSaving} />
+                  <button type="submit" className="primary-button" disabled={careerTopicSaving}><Icon name="plus" size={15} /> {careerTopicSaving ? 'Adding…' : 'Add topic'}</button>
+                </form>
+              </aside>
+              <section className="panel career-topic-detail">
+                {selectedCareerTopic ? <>
+                  <div className="section-heading">
+                    <div><span className="section-kicker">{selectedCareerTopic.parent_id ? 'SUBTOPIC' : 'TOPIC'}</span><h2>{selectedCareerTopic.title}</h2></div>
+                    <button type="button" className="transaction-delete" aria-label={`Delete ${selectedCareerTopic.title} and its subtopics`} title="Delete topic" disabled={careerTopicSaving} onClick={() => deleteCareerTopic(selectedCareerTopic)}><Icon name="trash" size={16} /></button>
+                  </div>
+                  <form className="career-notes-form" onSubmit={saveCareerTopicNotes}>
+                    <label htmlFor="career-topic-notes">Notes</label>
+                    <textarea id="career-topic-notes" value={careerTopicNotes} onChange={(event) => setCareerTopicNotes(event.target.value)} placeholder={`Write notes for ${selectedCareerTopic.title}…`} rows={13} maxLength={50000} disabled={careerTopicSaving} />
+                    <button type="submit" className="primary-button" disabled={careerTopicSaving}><Icon name="check" size={15} /> {careerTopicSaving ? 'Saving…' : 'Save notes'}</button>
+                  </form>
+                  <div className="career-child-topics">
+                    <div className="section-heading"><div><span className="section-kicker">GO DEEPER</span><h2>Sub-subtopics</h2></div></div>
+                    {careerTopicChildren(selectedCareerTopic.id).length > 0
+                      ? <div className="career-child-topic-list">{careerTopicChildren(selectedCareerTopic.id).map((topic) => <button type="button" className="career-child-topic" key={topic.id} onClick={() => selectCareerTopic(topic)}><span><Icon name="book" size={16} />{topic.title}</span><span className="career-child-go">Go <Icon name="arrow" size={13} /></span></button>)}</div>
+                      : <p className="career-topics-empty">No subtopics yet. Add one from the left pane.</p>}
+                  </div>
+                </> : <div className="career-topic-welcome">
+                  <span className="career-topic-welcome-icon"><Icon name="book" size={22} /></span>
+                  <h2>Choose a subtopic</h2>
+                  <p>Select a topic from the left pane to open its notes and add sub-subtopics.</p>
+                </div>}
+              </section>
+            </div>
+          </section>}
+
+          {activePage === 'Personal & life' && personalView === 'goals' && <section className="panel focus-panel">
+            <div className="section-heading"><div><span className="section-kicker">YOUR GOALS, AT YOUR PACE</span><h2>Personal & life goals</h2></div><span className="week-label">{goals.filter((goal) => goal.category === activePage).length} GOALS</span></div>
+            <p className="focus-intro">Personal milestones deserve space too. Open each goal to save private notes and images, and work through it at your own pace.</p>
+            <div className="focus-goals">
+              {goals.filter((goal) => goal.category === activePage).map((goal) => <article className="focus-goal-card personal-goal-card" key={goal.title} onClick={() => openPersonalGoalNotes(goal)} onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  openPersonalGoalNotes(goal)
+                }
+              }} role="button" tabIndex={0} aria-label={`Open notes for ${goal.title}`}>
+                <span className={`focus-goal-icon progress-${goal.color}`}><Icon name="heart" size={19} /></span>
+                <div className="focus-goal-content"><span className="section-kicker">{goal.category.toUpperCase()}</span><h3>{goal.title}</h3><p>{goal.detail}</p></div>
+                <span className="notes-button progress-button"><Icon name="journal" size={15} /> Open notes</span>
               </article>)}
             </div>
           </section>}
@@ -1658,6 +2023,7 @@ function App() {
                   <span className="section-kicker">A TRIP TO REMEMBER</span>
                   <h2>{selectedTrip.title}</h2>
                 </div>
+                <button type="button" className="transaction-delete" aria-label={`Delete trip: ${selectedTrip.title}`} title="Delete trip" disabled={deletingTripIds.includes(selectedTrip.id)} onClick={() => deleteTrip(selectedTrip)}><Icon name="trash" size={16} /></button>
               </div>
               <form className="trip-detail-form" onSubmit={saveTrip}>
                 <label htmlFor="trip-date">Trip date</label>
@@ -1702,11 +2068,14 @@ function App() {
               </div>
               {tripsError && <p className="trip-error" role="alert">{tripsError}<button type="button" className="business-note-retry" onClick={() => { setTripsError(''); setTripsLoading(true); setTripsReload((count) => count + 1) }}>Try again</button></p>}
               {tripsLoading ? <div className="business-note-status" role="status">Loading your trips…</div> : trips.length > 0
-                ? <div className="trip-list">{trips.map((trip) => <button type="button" className="trip-list-card" key={trip.id} onClick={() => openTrip(trip)}>
-                  <span className="trip-list-icon"><Icon name="journal" size={18} /></span>
-                  <span className="trip-list-copy"><strong>{trip.title}</strong><span>{trip.trip_date || trip.notes || `${Array.isArray(trip.media) ? trip.media.length : 0} photos or videos`}</span></span>
-                  <Icon name="chevron" size={18} />
-                </button>)}</div>
+                ? <div className="trip-list">{trips.map((trip) => <div className="trip-list-item" key={trip.id}>
+                  <button type="button" className="trip-list-card" onClick={() => openTrip(trip)}>
+                    <span className="trip-list-icon"><Icon name="journal" size={18} /></span>
+                    <span className="trip-list-copy"><strong>{trip.title}</strong><span>{trip.trip_date || trip.notes || `${Array.isArray(trip.media) ? trip.media.length : 0} photos or videos`}</span></span>
+                    <Icon name="chevron" size={18} />
+                  </button>
+                  <button type="button" className="transaction-delete trip-delete-button" aria-label={`Delete trip: ${trip.title}`} title="Delete trip" disabled={deletingTripIds.includes(trip.id)} onClick={() => deleteTrip(trip)}><Icon name="trash" size={15} /></button>
+                </div>)}</div>
                 : <div className="trip-empty-state"><span className="trip-list-icon"><Icon name="journal" size={20} /></span><strong>No trips yet</strong><p>Add a trip to start collecting your notes, photos, and videos.</p><button className="primary-button" onClick={() => { setNewTripTitle(''); setNewTripDate(''); setAddTripOpen(true) }}><Icon name="plus" size={15} /> Add your first trip</button></div>}
             </>}
           </section>}
@@ -1745,10 +2114,10 @@ function App() {
                 <div><span className="section-kicker">CAREER & PERSONAL</span><h2>Your goals in motion</h2></div>
               </div>
               <div className="goals-list">
-                {goals.map((goal, index) => (
+                {goals.map((goal) => (
                   <article className="goal-row" key={goal.title}>
-                    <button className={`goal-check ${goal.progress >= goal.total ? 'goal-complete' : ''}`} onClick={() => toggleGoal(index)} aria-label={`Log progress for ${goal.title}`}><Icon name="check" size={14} /></button>
-                    <div className="goal-main"><div className="goal-title-row"><h3>{goal.title}</h3><span>{goal.progress}/{goal.total}</span></div><p>{goal.category}</p><div className="progress-track"><span className={`progress-${goal.color}`} style={{ width: `${(goal.progress / goal.total) * 100}%` }} /></div></div>
+                    <button className="goal-open-button" onClick={() => goal.category === 'Career & skills' ? openCareerGoal(goal) : openPersonalGoalNotes(goal)} aria-label={`Go to ${goal.title}`}>Go <Icon name="arrow" size={13} /></button>
+                    <div className="goal-main"><div className="goal-title-row"><h3>{goal.title}</h3>{goal.category !== 'Career & skills' && <span>{goal.progress}/{goal.total}</span>}</div><p>{goal.category}</p></div>
                   </article>
                 ))}
               </div>
@@ -1872,7 +2241,7 @@ function App() {
 
 function pageSubtitle(page) {
   const descriptions = {
-    'Career & skills': 'Build a steady path through technical learning and communication skills.',
+    'Career & skills': 'Organize learning topics, subtopics, and notes in one place.',
     'Personal & life': 'Keep your personal goals and trip memories together in one calm, private space.',
     'Business exploration': 'Explore clothing, PG, event management, and water bottle business ideas.',
     Money: 'Track income, spending, EMIs, card purchases, and repayments together.',

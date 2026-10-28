@@ -12,6 +12,10 @@ Personal & life goal notes are saved in the separate `personal_life_notes` table
 
 Trips are saved in the private `trips` table with free-text trip dates, short notes, and media paths. Photos and videos are stored in the private `trip-memories` bucket (10 MB per photo, 50 MB per video). Run [`supabase/migrations/20261028000002_trips.sql`](./supabase/migrations/20261028000002_trips.sql) in the Supabase SQL Editor to set up the table, storage policies, and Realtime publication. If that migration was already applied, also run [`supabase/migrations/20261028000003_trip_date.sql`](./supabase/migrations/20261028000003_trip_date.sql) to add the trip date column.
 
+Available credit card names are stored separately from cards used for payment tracking. Run [`supabase/migrations/20261028000004_available_credit_cards.sql`](./supabase/migrations/20261028000004_available_credit_cards.sql) in the Supabase SQL Editor to set up the private, user-scoped list.
+
+Career & skills topics, nested subtopics, and notes are stored in the private `career_skill_topics` table. Run [`supabase/migrations/20261028000005_career_skill_topics.sql`](./supabase/migrations/20261028000005_career_skill_topics.sql) in the Supabase SQL Editor to enable the learning workspace.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)

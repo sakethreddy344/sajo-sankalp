@@ -1281,6 +1281,24 @@
 .goal-check:hover { border-color: #77a47c; }
 .goal-check.goal-complete { border-color: #79a47f; background: #79a47f; color: #fff; }
 
+.goal-open-button {
+  display: inline-flex;
+  min-width: 43px;
+  height: 25px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #e8eee6;
+  border-radius: 6px;
+  background: #f8faf7;
+  color: #64836a;
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.goal-open-button:hover { background: #edf4eb; }
+
 .goal-main { min-width: 0; flex: 1; }
 
 .goal-title-row {
@@ -1993,6 +2011,11 @@
   gap: 14px;
 }
 
+.money-left-column {
+  display: grid;
+  gap: 12px;
+}
+
 .money-transactions-panel,
 .commitment-panel {
   padding: 17px;
@@ -2179,6 +2202,66 @@
 .commitment-panel { padding-bottom: 10px; }
 .commitment-panel .section-heading { margin-bottom: 8px; }
 
+.available-card-form {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.available-card-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #e8eee6;
+  border-radius: 6px;
+  outline-color: #9db29c;
+  background: #fbfcfa;
+  color: #435047;
+  font-size: 9px;
+}
+
+.available-card-form .primary-button {
+  height: 31px;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  font-size: 8px;
+}
+
+.available-card-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.available-card-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  border-top: 1px solid #f0f1ee;
+  color: #435047;
+  font-size: 9px;
+}
+
+.available-card-list li > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.available-card-list li svg {
+  flex: 0 0 auto;
+  color: #7d82ab;
+}
+
+.available-card-delete {
+  width: 26px;
+  height: 26px;
+}
+
 .commitment-row {
   display: flex;
   min-width: 0;
@@ -2345,6 +2428,132 @@
   background: #fdfefd;
 }
 
+.career-goal-card {
+  width: 100%;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.career-goal-card:hover,
+.career-goal-card:focus-visible { border-color: #cadbc7; box-shadow: 0 5px 16px rgb(52 80 57 / 7%); }
+.career-goal-card:focus-visible { outline: 2px solid #a6c2a6; outline-offset: 2px; }
+.career-goal-card .focus-goal-content { display: flex; flex-direction: column; gap: 4px; }
+.career-goal-card .focus-goal-content strong { color: #3c4b41; font-size: 12px; }
+.career-goal-card .focus-goal-content > span:last-child { color: #8e978f; font-size: 9px; }
+.career-goal-open { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+
+.career-workspace { display: grid; gap: 13px; }
+
+.career-workspace-header {
+  padding: 17px 20px;
+}
+
+.career-workspace-header .trips-back-button { margin-bottom: 12px; }
+.career-workspace-header h2 { margin: 4px 0 0; color: #35463b; font-family: var(--serif); font-size: 19px; }
+
+.career-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(230px, .7fr) minmax(0, 1.5fr);
+  align-items: start;
+  gap: 13px;
+}
+
+.career-topic-sidebar,
+.career-topic-detail { min-width: 0; padding: 16px; }
+.career-topic-sidebar .section-heading,
+.career-topic-detail > .section-heading { margin-bottom: 10px; }
+
+.career-all-topics {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #edf0ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #718174;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+}
+
+.career-all-topics-selected,
+.career-all-topics:hover { border-color: #dce8da; background: #f5f8f3; color: #4c6d51; }
+
+.career-topic-tree {
+  display: grid;
+  gap: 3px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.career-topic-tree .career-topic-tree {
+  margin: 2px 0 2px 13px;
+  padding-left: 7px;
+  border-left: 1px solid #e8eee6;
+}
+
+.career-topic-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.career-topic-row-selected { background: #f1f6ef; }
+
+.career-topic-select {
+  min-width: 0;
+  flex: 1;
+  padding: 6px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #536157;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.career-topic-row-selected .career-topic-select { color: #3e6546; font-weight: 600; }
+.career-topic-go { padding: 5px 7px; border: 0; border-radius: 5px; background: #f6f8f5; color: #708573; cursor: pointer; font-size: 8px; }
+.career-topic-go:hover { background: #e8f0e5; color: #4c7452; }
+.career-topic-delete { width: 25px; height: 25px; opacity: .65; }
+.career-topic-add-form { display: grid; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f1ee; }
+.career-topic-add-form label,
+.career-notes-form label { color: #69766c; font-size: 9px; font-weight: 600; }
+.career-topic-add-form input { width: 100%; min-width: 0; padding: 9px; border: 1px solid #e6eae4; border-radius: 6px; outline-color: #9db29c; background: #fbfcfa; color: #435047; font-size: 9px; }
+.career-topic-add-form .primary-button,
+.career-notes-form .primary-button { min-height: 32px; justify-self: start; padding: 0 10px; font-size: 9px; }
+.career-topics-empty { margin: 10px 0; color: #929b93; font-size: 9px; line-height: 1.6; }
+
+.career-topic-detail { min-height: 360px; }
+.career-topic-detail > .section-heading h2 { margin: 4px 0 0; color: #35463b; font-family: var(--serif); font-size: 18px; }
+.career-notes-form { display: grid; gap: 8px; }
+.career-notes-form textarea { width: 100%; min-height: 230px; resize: vertical; padding: 11px; border: 1px solid #e8ece6; border-radius: 7px; outline-color: #9db29c; background: #fcfdfb; color: #435047; font: inherit; font-size: 10px; line-height: 1.65; }
+.career-child-topics { margin-top: 17px; padding-top: 13px; border-top: 1px solid #f0f1ee; }
+.career-child-topics .section-heading { margin-bottom: 7px; }
+.career-child-topics .section-heading h2 { margin: 3px 0; color: #536157; font-size: 11px; }
+.career-child-topic-list { display: grid; gap: 6px; }
+.career-child-topic { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid #edf0ea; border-radius: 7px; background: #fff; color: #536157; cursor: pointer; font: inherit; font-size: 9px; text-align: left; }
+.career-child-topic:hover { border-color: #cadbc7; background: #f8faf7; }
+.career-child-topic > span,
+.career-child-go { display: inline-flex; align-items: center; gap: 6px; }
+.career-child-topic > span:first-child svg { color: #78917a; }
+.career-child-go { color: #66836b; }
+.career-topic-welcome { display: flex; min-height: 320px; flex-direction: column; align-items: center; justify-content: center; padding: 25px; text-align: center; }
+.career-topic-welcome-icon { display: grid; width: 43px; height: 43px; place-items: center; margin-bottom: 9px; border-radius: 12px; background: #edf4e9; color: #668967; }
+.career-topic-welcome h2 { margin: 0; color: #46564a; font-family: var(--serif); font-size: 15px; }
+.career-topic-welcome p { max-width: 300px; margin: 6px 0 0; color: #929b93; font-size: 9px; line-height: 1.6; }
+
 .trips-entry-panel {
   display: flex;
   width: 100%;
@@ -2426,10 +2635,18 @@
 .trips-back-button svg { transform: rotate(180deg); }
 .trip-list { display: grid; gap: 9px; }
 
+.trip-list-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
 .trip-list-card {
   display: flex;
-  width: 100%;
+  width: auto;
   min-width: 0;
+  flex: 1;
   align-items: center;
   gap: 12px;
   padding: 13px;
@@ -2444,6 +2661,8 @@
 .trip-list-card:hover,
 .trip-list-card:focus-visible { border-color: #cadbc7; background: #fbfdf9; }
 .trip-list-card:focus-visible { outline: 2px solid #a6c2a6; outline-offset: 2px; }
+.trip-delete-button { width: 34px; height: 34px; flex: 0 0 auto; opacity: .7; }
+.trip-delete-button:hover { border-color: #f0d9d4; background: #fcf1ee; color: #ac5149; opacity: 1; }
 .trip-list-icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #edf4e9; color: #668967; }
 .trip-list-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
 .trip-list-copy strong { overflow: hidden; color: #3f4e44; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -2763,6 +2982,7 @@
   .money-content-grid,
   .business-idea-grid { grid-template-columns: minmax(0, 1fr); }
   .money-content-grid { gap: 11px; }
+  .career-workspace-grid { grid-template-columns: minmax(0, 1fr); }
   .money-transactions-panel,
   .commitment-panel { padding: 13px; }
   .transaction-row { gap: 5px; }
@@ -2773,6 +2993,9 @@
   .focus-panel,
   .business-panel,
   .trips-panel { padding: 15px; }
+  .career-workspace-header,
+  .career-topic-sidebar,
+  .career-topic-detail { padding: 13px; }
   .trips-entry-panel { align-items: flex-start; padding: 14px; }
   .trips-entry-panel > .primary-button { padding: 0 9px; font-size: 9px; }
   .trips-heading { gap: 8px; }
@@ -2783,6 +3006,9 @@
   .focus-goal-card { flex-wrap: wrap; gap: 10px; padding: 12px; }
   .focus-goal-content { flex-basis: calc(100% - 51px); }
   .progress-button { margin-left: 48px; }
+  .career-goal-card { flex-wrap: nowrap; gap: 9px; }
+  .career-goal-card .focus-goal-content { flex-basis: 0; }
+  .career-goal-open { padding: 0 7px; }
   .business-panel > .section-heading { align-items: flex-start; }
   .business-panel .money-add-button { padding: 0 7px; font-size: 8px; }
   .money-tip { padding: 10px; }
