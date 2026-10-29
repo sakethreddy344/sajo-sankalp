@@ -730,6 +730,7 @@ function App() {
   const remainingMonthlyEmi = Math.max(0, totalMonthlyEmi - totalMonthlyEmiPayments)
   const totalIncome = monthTransactions.filter((entry) => entry.type === 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const totalOutgoings = monthTransactions.filter((entry) => entry.type !== 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
+  const remainingMonthlyBalance = totalIncome - totalOutgoings
   const monthlyTotals = monthNames.map((name, monthIndex) => {
     const key = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`
     const entries = yearTransactions.filter((entry) => entry.date?.slice(0, 7) === key)
@@ -2502,7 +2503,7 @@ function App() {
             <div className="money-summary-grid">
               <article className="money-summary money-summary-income"><span><Icon name="income" size={18} /></span><div><small>{monthNames[selectedMonth].toUpperCase()} {selectedYear} · INCOME</small><strong>{formatMoney(totalIncome)}</strong><em>{monthTransactions.filter((entry) => entry.type === 'Income').length} income entries</em></div></article>
               <article className="money-summary money-summary-spend"><span><Icon name="expense" size={18} /></span><div><small>{monthNames[selectedMonth].toUpperCase()} {selectedYear} · SPENDING</small><strong>{formatMoney(totalOutgoings)}</strong><em>All payment sources</em></div></article>
-              <article className="money-summary money-summary-cards"><span><Icon name="card" size={18} /></span><div><small>CARD REPAYMENTS</small><strong>{formatMoney(monthTransactions.filter((entry) => entry.category === 'Card repayment' || entry.type === 'Card repayment').reduce((total, entry) => total + Number(entry.amount), 0))}</strong><em>{cards.length} cards tracked</em></div></article>
+              <article className={`money-summary money-summary-balance${remainingMonthlyBalance < 0 ? ' money-summary-balance-negative' : ''}`}><span><Icon name={remainingMonthlyBalance < 0 ? 'expense' : 'income'} size={18} /></span><div><small>REMAINING BALANCE</small><strong>{formatMoney(remainingMonthlyBalance)}</strong><em>Income minus spending</em></div></article>
             </div>
 
             <div className="money-content-grid">

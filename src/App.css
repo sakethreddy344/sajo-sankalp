@@ -2108,8 +2108,9 @@
 .transaction-income { background: #eaf3e9; color: #588363; }
 .money-summary-spend > span,
 .transaction-spend { background: #fbf0e8; color: #bc8157; }
-.money-summary-cards > span,
 .transaction-repayment { background: #eff0f8; color: #797da8; }
+.money-summary-balance > span { background: #eaf3e9; color: #588363; }
+.money-summary-balance-negative > span { background: #fbf0e8; color: #bc8157; }
 
 .money-summary > div {
   display: flex;
