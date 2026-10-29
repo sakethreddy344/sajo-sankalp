@@ -1780,6 +1780,33 @@
 .idea-modal input::placeholder,
 .idea-modal textarea::placeholder { color: #a8afa8; }
 
+.idea-modal .emi-completed-toggle {
+  justify-content: flex-start;
+  gap: 9px;
+  margin: 14px 0 2px;
+  padding: 10px 11px;
+  border: 1px solid #dcebd9;
+  border-radius: 7px;
+  background: #f5f9f3;
+  color: #4e6751;
+  cursor: pointer;
+}
+
+.idea-modal .emi-completed-toggle input {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: #5b825f;
+}
+
+.idea-modal .emi-completed-toggle span {
+  color: #4e6751;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 .modal-submit {
   position: sticky;
   z-index: 1;
@@ -2119,10 +2146,7 @@
   gap: 14px;
 }
 
-.money-left-column {
-  display: grid;
-  gap: 12px;
-}
+.money-left-column { display: grid; gap: 12px; }
 
 .money-transactions-panel,
 .commitment-panel {
@@ -2258,6 +2282,11 @@
   white-space: nowrap;
 }
 
+.commitment-row > div .emi-date-line {
+  overflow: visible;
+  white-space: normal;
+}
+
 .transaction-row time { flex: 0 0 auto; }
 
 .transaction-amount {
@@ -2309,6 +2338,249 @@
 .commitments-column { display: grid; gap: 12px; }
 .commitment-panel { padding-bottom: 10px; }
 .commitment-panel .section-heading { margin-bottom: 8px; }
+
+.commitment-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.commitment-summary-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 6px;
+  border: 1px solid #e8ece6;
+  border-radius: 7px;
+  background: #fafbf9;
+}
+
+.commitment-summary-card span {
+  overflow: hidden;
+  color: #78847a;
+  font-size: 8px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commitment-summary-card strong {
+  overflow: hidden;
+  color: #435047;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commitment-summary-paid { border-color: #dcebd9; background: #f0f7ee; }
+.commitment-summary-paid strong { color: #416d48; }
+.commitment-summary-remaining { border-color: #f0e5d4; background: #fbf6ed; }
+.commitment-summary-remaining strong { color: #986d36; }
+
+.completed-emi-list { display: grid; }
+
+.completed-emi-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 0;
+  border-top: 1px solid #f0f1ee;
+}
+
+.completed-emi-icon { flex: 0 0 auto; background: #eaf3e9; color: #538461; }
+
+.completed-emi-details {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.completed-emi-details > strong {
+  overflow: hidden;
+  color: #435047;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completed-emi-details > span {
+  color: #89938b;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.completed-emi-details > span b { color: #416d48; font-weight: 700; }
+
+.completed-emi-badge {
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border-radius: 10px;
+  background: #eaf3e9;
+  color: #538461;
+  font-size: 7px;
+  font-weight: 700;
+}
+
+.subscription-form {
+  display: grid;
+  gap: 7px;
+  padding-bottom: 12px;
+}
+
+.subscription-form > label,
+.subscription-date-fields label {
+  color: #536258;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.subscription-form input,
+.subscription-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #e8eee6;
+  border-radius: 6px;
+  outline-color: #9db29c;
+  background: #fbfcfa;
+  color: #435047;
+  font: inherit;
+  font-size: 9px;
+}
+
+.subscription-date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.subscription-date-fields > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.subscription-form-actions { display: flex; align-items: center; gap: 7px; }
+.subscription-form-actions .primary-button { height: 31px; padding: 0 9px; font-size: 8px; }
+.subscription-add-button { height: 31px; flex: 0 0 auto; padding: 0 9px; font-size: 8px; }
+.subscription-error { margin: 0; color: #a45b50; font-size: 9px; line-height: 1.5; }
+.subscription-list { display: grid; }
+
+.subscription-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid #f0f1ee;
+}
+
+.subscription-icon { flex: 0 0 auto; background: #eef0f8; color: #7d82ab; }
+
+.subscription-details {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subscription-details > strong {
+  overflow: hidden;
+  color: #435047;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subscription-details > span { color: #89938b; font-size: 8px; }
+.subscription-amount { flex: 0 0 auto; color: #416d48; font-size: 10px; white-space: nowrap; }
+.subscription-row:hover .commitment-edit,
+.subscription-row:hover .commitment-delete { opacity: 1; }
+
+.holding-row:hover .commitment-edit,
+.holding-row:hover .commitment-delete { opacity: 1; }
+
+.holding-row { flex-wrap: wrap; }
+.holding-icon { flex: 0 0 auto; background: #eaf3e9; color: #588363; }
+.holding-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.holding-total {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 7px;
+  border: 1px solid #dcebd9;
+  border-radius: 8px;
+  background: #f0f7ee;
+}
+
+.holding-total span { color: #536d56; font-size: 8px; font-weight: 600; }
+.holding-total strong { color: #356a3e; font-size: 11px; font-weight: 700; }
+.holding-monthly-sip-total { border-color: #d7e5f2; background: #eef5fb; }
+.holding-monthly-sip-total span { color: #536c82; }
+.holding-monthly-sip-total strong { color: #456b8a; }
+.emi-sip-total-badge { border-color: #e7dfc8; background: #faf7ee; }
+.emi-sip-total-badge span { color: #786b49; }
+.emi-sip-total-badge strong { color: #826c36; }
+.emi-sip-total-badge small { color: #8a8068; font-size: 7px; line-height: 1.3; }
+
+.subscription-details > .holding-sip-badge {
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid #dcebd9;
+  border-radius: 999px;
+  color: #416d48;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.subscription-details > .holding-sip-badge-daily { border-color: #d7e5f2; background: #eef5fb; color: #456b8a; }
+.subscription-details > .holding-sip-badge-monthly { background: #f0f7ee; }
+.subscription-details > span b { color: #416d48; font-weight: 700; }
+.holding-payment-button { color: #4a694f; white-space: nowrap; }
+.holding-month-payment {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 0 2px 39px;
+}
+
+.holding-month-payment label {
+  grid-column: 1 / -1;
+  color: #536258;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.holding-month-payment input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #e8eee6;
+  border-radius: 6px;
+  outline-color: #9db29c;
+  background: #fbfcfa;
+  color: #435047;
+  font-size: 9px;
+}
+
+.holding-spending-note { margin: 2px 0 0; color: #89938b; font-size: 8px; line-height: 1.5; }
 
 .available-card-form {
   display: flex;
@@ -2426,6 +2698,7 @@
   margin-top: 1px;
 }
 
+.commitment-activity > span strong { color: #416d48; font-weight: 700; }
 .commitment-activity > .no-activity {
   color: #a0a69f;
 }
@@ -2438,6 +2711,27 @@
 
 .commitment-emi { background: #f8f1e4; color: #ad8954; }
 .commitment-card { background: #eef0f8; color: #7d82ab; }
+
+.commitment-amount {
+  display: flex;
+  width: fit-content;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid #dcebd9;
+  border-radius: 6px;
+  background: #f0f7ee;
+  color: #416d48 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  white-space: nowrap;
+}
+
+.commitment-amount small {
+  color: #758c76;
+  font-size: 7px;
+  letter-spacing: .4px;
+}
 
 .commitment-row > div {
   display: flex;
@@ -2460,6 +2754,16 @@
 
 .small-action:hover,
 .commitment-add:hover { background: #edf4eb; }
+
+.small-action.payment-logged {
+  border-color: #b7d7ba;
+  background: #e8f4e8;
+  color: #347a43;
+  opacity: 1;
+}
+
+.small-action.payment-logged:hover { border-color: #9dc9a2; background: #dcefdc; }
+.small-action.payment-logged:disabled { border-color: #b7d7ba; background: #e8f4e8; color: #347a43; opacity: 1; }
 
 .commitment-empty {
   margin: 0;
@@ -2484,20 +2788,6 @@
   cursor: pointer;
   font-size: 9px;
 }
-
-.money-tip {
-  display: flex;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid #f0eadc;
-  border-radius: 9px;
-  background: #fbf8f0;
-  color: #bb975f;
-}
-
-.money-tip > svg { flex: 0 0 auto; margin-top: 1px; }
-.money-tip p { color: #978e7e; font-size: 8px; line-height: 1.6; }
-.money-tip p strong { display: block; margin-bottom: 3px; color: #77684f; font-size: 9px; }
 
 .money-modal select {
   width: 100%;
@@ -2717,6 +3007,47 @@
   color: #64836a;
   cursor: pointer;
 }
+
+.chit-fund-panel > .section-heading { align-items: center; }
+.chit-fund-current-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid #dcebd9;
+  border-radius: 7px;
+  background: #f0f7ee;
+}
+
+.chit-fund-current-total span { color: #536d56; font-size: 9px; font-weight: 600; }
+.chit-fund-current-total strong { color: #356a3e; font-size: 13px; }
+.chit-fund-form { margin-bottom: 8px; }
+.chit-fund-list { display: grid; }
+.chit-fund-item { min-width: 0; padding: 10px 0; border-top: 1px solid #f0f1ee; }
+.chit-fund-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.chit-fund-heading > div:first-child { display: grid; min-width: 0; gap: 4px; }
+.chit-fund-heading > div:first-child strong { overflow-wrap: anywhere; color: #435047; font-size: 10px; }
+.chit-fund-heading > div:first-child span { color: #89938b; font-size: 8px; }
+.chit-fund-actions { display: flex; flex: 0 0 auto; gap: 3px; }
+.chit-fund-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
+.chit-fund-stats > span { display: grid; min-width: 0; gap: 3px; color: #89938b; font-size: 7px; }
+.chit-fund-stats b { overflow-wrap: anywhere; color: #536258; font-size: 8px; }
+.chit-months-accordion { border-top: 1px solid #f0f1ee; }
+.chit-months-accordion > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px; color: #536258; cursor: pointer; font-size: 8px; list-style: none; }
+.chit-months-accordion > summary::-webkit-details-marker { display: none; }
+.chit-months-accordion > summary::before { content: '›'; width: 10px; color: #89938b; transition: transform 120ms ease; }
+.chit-months-accordion[open] > summary::before { transform: rotate(90deg); }
+.chit-months-accordion > summary strong { margin-left: auto; color: #728373; font-size: 7px; font-weight: 600; }
+.chit-month-list { display: grid; max-height: 260px; overflow-y: auto; }
+.chit-month-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 8px; padding: 7px 2px; border-top: 1px solid #f3f4f1; }
+.chit-month-name { grid-column: 1; color: #536258; font-size: 8px; font-weight: 600; }
+.chit-month-paid .chit-month-name { color: #347a43; }
+.chit-transaction-field { display: grid; min-width: 0; gap: 3px; color: #89938b; font-size: 7px; }
+.chit-transaction-field input { width: 100%; min-width: 0; padding: 5px 6px; border: 1px solid #e8eee6; border-radius: 5px; background: #fbfcfa; color: #435047; font: inherit; font-size: 8px; }
+.chit-month-payment { min-width: 0; overflow-wrap: anywhere; color: #5b7c60; font-size: 8px; }
+.chit-month-button { grid-column: 2; grid-row: 1 / span 2; }
 
 .notes-button:hover { background: #edf4eb; }
 .focus-panel .section-heading { margin-bottom: 12px; }
@@ -3117,7 +3448,6 @@
   .career-goal-open { padding: 0 7px; }
   .business-panel > .section-heading { align-items: flex-start; }
   .business-panel .money-add-button { padding: 0 7px; font-size: 8px; }
-  .money-tip { padding: 10px; }
   .ideas-panel,
   .goals-panel { min-height: unset; }
   .habit-panel,

@@ -15,9 +15,11 @@ export function toMoneyEntryRow(entry, cards, emis, userId) {
   const card = entry.cardId
     ? cards.find((item) => item.id === entry.cardId)
     : cards.find((item) => item.name === entry.cardName)
-  const emi = entry.emiId
-    ? emis.find((item) => item.id === entry.emiId)
-    : emis.find((item) => item.name === entry.name)
+  const emi = entry.category === 'EMI payment'
+    ? entry.emiId
+      ? emis.find((item) => item.id === entry.emiId)
+      : emis.find((item) => item.name === entry.name)
+    : undefined
   const paymentSource = entry.type === 'Income'
     ? 'other_income'
     : sourceToDatabase[entry.category] || 'other'
@@ -40,6 +42,7 @@ export function toMoneyEntryRow(entry, cards, emis, userId) {
     entry_date: entry.date,
     card_id: card?.id || null,
     emi_id: emi?.id || null,
+    holding_id: entry.holdingId || null,
   }
 }
 
@@ -58,6 +61,7 @@ export function fromMoneyEntryRow(row, cards) {
     cardName: linkedCard?.name || '',
     cardId: row.card_id || '',
     emiId: row.emi_id || '',
+    holdingId: row.holding_id || '',
   }
 }
 
@@ -65,6 +69,7 @@ export function toCardRow(card, userId) {
   return {
     id: card.id,
     user_id: userId,
+    record_type: 'card',
     name: card.name,
     due_day: card.dueDay ? Number(card.dueDay) : null,
     opening_balance: Number(card.amount) || 0,
@@ -80,6 +85,40 @@ export function fromCardRow(row) {
   }
 }
 
+export function toChitFundRow(chitFund, userId) {
+  return {
+    id: chitFund.id,
+    user_id: userId,
+    record_type: 'chit_fund',
+    name: chitFund.name,
+    due_day: null,
+    opening_balance: 0,
+    monthly_amount: Number(chitFund.monthlyAmount),
+    start_date: chitFund.startDate,
+    end_date: chitFund.endDate,
+    paid_months: chitFund.paidMonths,
+  }
+}
+
+export function fromChitFundRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    monthlyAmount: Number(row.monthly_amount),
+    startDate: row.start_date,
+    endDate: row.end_date,
+    paidMonths: Array.isArray(row.paid_months)
+      ? row.paid_months.filter((payment) => (
+        payment && typeof payment.month === 'string' && /^\d{4}-\d{2}$/.test(payment.month)
+      )).map((payment) => ({
+        month: payment.month,
+        transactionId: typeof payment.transactionId === 'string' ? payment.transactionId : '',
+        moneyEntryId: typeof payment.moneyEntryId === 'string' ? payment.moneyEntryId : '',
+      }))
+      : [],
+  }
+}
+
 export function toEmiRow(emi, userId) {
   return {
     id: emi.id,
@@ -88,6 +127,8 @@ export function toEmiRow(emi, userId) {
     monthly_emi: Number(emi.amount),
     due_day: Number(emi.dueDay),
     start_date: emi.startDate || null,
+    end_date: emi.endDate || null,
+    is_completed: Boolean(emi.isCompleted),
   }
 }
 
@@ -98,6 +139,8 @@ export function fromEmiRow(row) {
     amount: Number(row.monthly_emi),
     dueDay: String(row.due_day),
     startDate: row.start_date || '',
+    endDate: row.end_date || '',
+    isCompleted: row.is_completed === true,
   }
 }
 

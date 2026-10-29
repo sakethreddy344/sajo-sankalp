@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fromCardRow, fromEmiRow, fromMoneyEntryRow, toCardRow, toEmiRow, toMoneyEntryRow } from './moneyData'
+import { fromCardRow, fromChitFundRow, fromEmiRow, fromMoneyEntryRow, toCardRow, toChitFundRow, toEmiRow, toMoneyEntryRow } from './moneyData'
 import { supabase, supabaseConfigured } from './supabase'
 import './App.css'
 
@@ -83,6 +83,23 @@ function dateInputValue(date) {
   return `${year}-${month}-${day}`
 }
 
+function getMonthsInRange(startDate, endDate) {
+  if (!startDate || !endDate || endDate < startDate) return []
+
+  const [startYear, startMonth] = startDate.slice(0, 7).split('-').map(Number)
+  const [endYear, endMonth] = endDate.slice(0, 7).split('-').map(Number)
+  const totalMonths = (endYear - startYear) * 12 + endMonth - startMonth + 1
+  if (!Number.isInteger(totalMonths) || totalMonths < 1) return []
+
+  return Array.from({ length: totalMonths }, (_, index) => {
+    const date = new Date(startYear, startMonth - 1 + index, 1)
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      label: date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+    }
+  })
+}
+
 function getLoginStreak(activityDates, today) {
   const dateSet = new Set(activityDates)
   const yesterday = new Date(`${today}T00:00:00`)
@@ -109,7 +126,7 @@ function getDueTomorrowNotifications(emis, cards, today) {
     && Math.min(Number(item.dueDay), lastDayOfMonth) === tomorrowDay
 
   return [
-    ...emis.filter(dueTomorrow).map((emi) => ({
+    ...emis.filter((emi) => !emi.isCompleted && dueTomorrow(emi)).map((emi) => ({
       id: `emi-${emi.id}`,
       title: `${emi.name} EMI is due tomorrow`,
       detail: `Monthly payment · ${formatMoney(Number(emi.amount))}`,
@@ -181,7 +198,35 @@ function App() {
   const [transactions, setTransactions] = useState([])
   const [emis, setEmis] = useState([])
   const [cards, setCards] = useState([])
+  const [chitFunds, setChitFunds] = useState([])
+  const [chitFundName, setChitFundName] = useState('')
+  const [chitFundMonthlyAmount, setChitFundMonthlyAmount] = useState('')
+  const [chitFundStartDate, setChitFundStartDate] = useState('')
+  const [chitFundEndDate, setChitFundEndDate] = useState('')
+  const [chitFundFormOpen, setChitFundFormOpen] = useState(false)
+  const [editingChitFundId, setEditingChitFundId] = useState(null)
+  const [chitFundError, setChitFundError] = useState('')
+  const [chitTransactionIds, setChitTransactionIds] = useState({})
   const [availableCards, setAvailableCards] = useState([])
+  const [holdings, setHoldings] = useState([])
+  const [holdingName, setHoldingName] = useState('')
+  const [holdingFrequency, setHoldingFrequency] = useState('monthly')
+  const [holdingSipAmount, setHoldingSipAmount] = useState('')
+  const [holdingCurrentValue, setHoldingCurrentValue] = useState('')
+  const [holdingFormOpen, setHoldingFormOpen] = useState(false)
+  const [editingHoldingId, setEditingHoldingId] = useState(null)
+  const [holdingError, setHoldingError] = useState('')
+  const [holdingPaymentFormId, setHoldingPaymentFormId] = useState(null)
+  const [holdingPaymentFormMonth, setHoldingPaymentFormMonth] = useState('')
+  const [holdingPaymentAmount, setHoldingPaymentAmount] = useState('')
+  const [subscriptions, setSubscriptions] = useState([])
+  const [subscriptionName, setSubscriptionName] = useState('')
+  const [subscriptionAmount, setSubscriptionAmount] = useState('')
+  const [subscriptionStartDate, setSubscriptionStartDate] = useState('')
+  const [subscriptionEndDate, setSubscriptionEndDate] = useState('')
+  const [editingSubscriptionId, setEditingSubscriptionId] = useState(null)
+  const [subscriptionFormOpen, setSubscriptionFormOpen] = useState(false)
+  const [subscriptionError, setSubscriptionError] = useState('')
   const [completedDays, setCompletedDays] = usePersistentState('daymark-habits', [])
   const [selectedYear, setSelectedYear] = useState(appDate.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(null)
@@ -190,6 +235,8 @@ function App() {
   const [moneyModalType, setMoneyModalType] = useState('transaction')
   const [editingTransactionId, setEditingTransactionId] = useState(null)
   const [editingCommitmentId, setEditingCommitmentId] = useState(null)
+  const [emiCompleted, setEmiCompleted] = useState(false)
+  const [emiEndDate, setEmiEndDate] = useState('')
   const [session, setSession] = useState(null)
   const [loginStreak, setLoginStreak] = useState(null)
   const [streakError, setStreakError] = useState('')
@@ -240,6 +287,7 @@ function App() {
   const [newTripDate, setNewTripDate] = useState('')
   const [tripSaving, setTripSaving] = useState(false)
   const [selectedTrip, setSelectedTrip] = useState(null)
+  const [tripTitle, setTripTitle] = useState('')
   const [tripDate, setTripDate] = useState('')
   const [tripNotes, setTripNotes] = useState('')
   const [tripMediaPaths, setTripMediaPaths] = useState([])
@@ -369,6 +417,8 @@ function App() {
       .channel(`money-data:${userId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'available_credit_cards', filter: `user_id=eq.${userId}` }, refreshData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'holdings', filter: `user_id=eq.${userId}` }, refreshData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subscriptions', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'career_skill_topics', filter: `user_id=eq.${userId}` }, () => {
         setCareerTopicsLoading(true)
         setCareerTopicsReload((count) => count + 1)
@@ -453,20 +503,26 @@ function App() {
         throw new Error(`Could not preserve your existing browser-only finance records: ${error.message}`)
       }
 
-      const [cardResult, availableCardResult, emiResult, entryResult] = await Promise.all([
+      const [cardResult, availableCardResult, holdingResult, subscriptionResult, emiResult, entryResult] = await Promise.all([
         supabase.from('cards').select('*').order('created_at'),
         supabase.from('available_credit_cards').select('id, name, created_at').order('created_at'),
+        supabase.from('holdings').select('id, name, sip_frequency, daily_sip, monthly_sip, current_value, created_at').order('created_at'),
+        supabase.from('subscriptions').select('id, name, amount, start_date, end_date, created_at').order('start_date', { ascending: false }),
         supabase.from('emis').select('*').order('created_at'),
         supabase.from('money_entries').select('*').order('entry_date', { ascending: false }),
       ])
-      const failedResult = [cardResult, availableCardResult, emiResult, entryResult].find((result) => result.error)
+      const failedResult = [cardResult, availableCardResult, holdingResult, subscriptionResult, emiResult, entryResult].find((result) => result.error)
       if (failedResult?.error) throw failedResult.error
       if (!active) return
 
-      const loadedCards = cardResult.data.map(fromCardRow)
+      const loadedCards = cardResult.data.filter((row) => row.record_type !== 'chit_fund').map(fromCardRow)
+      const loadedChitFunds = cardResult.data.filter((row) => row.record_type === 'chit_fund').map(fromChitFundRow)
       const loadedEntries = entryResult.data.map((row) => fromMoneyEntryRow(row, loadedCards))
       setCards(loadedCards)
+      setChitFunds(loadedChitFunds)
       setAvailableCards(availableCardResult.data)
+      setHoldings(holdingResult.data)
+      setSubscriptions(subscriptionResult.data)
       setEmis(emiResult.data.map(fromEmiRow))
       setTransactions(loadedEntries)
       setCloudNotice('')
@@ -652,15 +708,26 @@ function App() {
   ]
   const yearTransactions = transactions.filter((entry) => entry.date?.slice(0, 4) === String(selectedYear))
   const monthTransactions = yearTransactions.filter((entry) => entry.date?.slice(0, 7) === selectedMonthKey)
-  const cardsWithBalances = cards.map((card) => ({
-    ...card,
-    amount: transactions.reduce((balance, entry) => {
-      if (entry.cardName !== card.name) return balance
-      if (entry.category === 'Credit card payment') return balance + Number(entry.amount)
-      if (entry.category === 'Card repayment') return Math.max(0, balance - Number(entry.amount))
-      return balance
-    }, Number(card.amount) || 0),
-  }))
+  const totalHoldingsValue = holdings.reduce((total, holding) => total + Number(holding.current_value || 0), 0)
+  const totalMonthlySip = holdings.reduce((total, holding) => (
+    total + (holding.sip_frequency === 'daily'
+      ? Number(holding.daily_sip || 0) * 30
+      : Number(holding.monthly_sip || 0))
+  ), 0)
+  const totalChitFundHolding = chitFunds.reduce((total, chitFund) => {
+    const months = getMonthsInRange(chitFund.startDate, chitFund.endDate)
+    const paidMonthKeys = new Set(months.map((month) => month.key))
+    const paidMonthCount = chitFund.paidMonths.filter((payment) => paidMonthKeys.has(payment.month)).length
+    return total + paidMonthCount * chitFund.monthlyAmount
+  }, 0)
+  const activeEmis = emis.filter((emi) => !emi.isCompleted)
+  const completedEmis = emis.filter((emi) => emi.isCompleted)
+  const monthlyEmiPayments = monthTransactions.filter((entry) => entry.category === 'EMI payment')
+  const totalMonthlyEmi = activeEmis.reduce((total, emi) => total + Number(emi.amount), 0)
+  const totalMonthlyEmiPayments = monthlyEmiPayments
+    .filter((payment) => activeEmis.some((emi) => payment.emiId === emi.id || (!payment.emiId && payment.name === emi.name)))
+    .reduce((total, payment) => total + Number(payment.amount), 0)
+  const remainingMonthlyEmi = Math.max(0, totalMonthlyEmi - totalMonthlyEmiPayments)
   const totalIncome = monthTransactions.filter((entry) => entry.type === 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const totalOutgoings = monthTransactions.filter((entry) => entry.type !== 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const monthlyTotals = monthNames.map((name, monthIndex) => {
@@ -823,6 +890,7 @@ function App() {
 
   const openTrip = (trip) => {
     setSelectedTrip(trip)
+    setTripTitle(trip.title || '')
     setTripDate(trip.trip_date || '')
     setTripNotes(trip.notes || '')
     setTripMediaPaths(Array.isArray(trip.media) ? trip.media : [])
@@ -958,6 +1026,12 @@ function App() {
     event.preventDefault()
     if (!supabase || !session || !selectedTrip) return
 
+    const title = tripTitle.trim()
+    if (!title) {
+      setTripMediaError('Trip name cannot be empty.')
+      return
+    }
+
     setTripMediaError('')
     setTripSaving(true)
     const uploadedPaths = []
@@ -974,7 +1048,7 @@ function App() {
       const media = [...tripMediaPaths, ...uploadedPaths]
       const { data, error } = await supabase
         .from('trips')
-        .update({ trip_date: tripDate.trim(), notes: tripNotes, media, updated_at: new Date().toISOString() })
+        .update({ title, trip_date: tripDate.trim(), notes: tripNotes, media, updated_at: new Date().toISOString() })
         .eq('id', selectedTrip.id)
         .eq('user_id', session.user.id)
         .select('id, title, trip_date, notes, media, created_at')
@@ -1330,6 +1404,8 @@ function App() {
     setEntryCard('')
     setEntryDueDay('')
     setEntryDueDate(dateInputValue(appDate))
+    setEmiCompleted(false)
+    setEmiEndDate('')
     setMoneyModalOpen(true)
   }
 
@@ -1355,6 +1431,8 @@ function App() {
       Math.min(Number(commitment.dueDay), new Date(appDate.getFullYear(), appDate.getMonth() + 1, 0).getDate()),
     ))
     setEntryDueDate(type === 'emi' ? emiDueDate : dateInputValue(appDate))
+    setEmiCompleted(type === 'emi' && commitment.isCompleted)
+    setEmiEndDate(type === 'emi' ? commitment.endDate : '')
     setMoneyModalOpen(true)
   }
 
@@ -1375,24 +1453,53 @@ function App() {
 
   const saveMoneyEntry = async (event) => {
     event.preventDefault()
-    if (!supabase || !session) return
+    if (!supabase || !session) {
+      setCloudError('Sign in to save EMI changes.')
+      return
+    }
     const amount = Number(entryAmount)
     const name = entryName.trim()
     const reason = entryReason.trim()
-    if (!name || !Number.isFinite(amount) || (moneyModalType === 'card' ? amount < 0 : amount <= 0)) return
+    if (!name) {
+      setCloudError(moneyModalType === 'emi' ? 'Enter an EMI or loan name.' : 'Enter a name.')
+      return
+    }
+    if (!Number.isFinite(amount) || (moneyModalType === 'card' ? amount < 0 : amount <= 0)) {
+      setCloudError('Enter a valid amount.')
+      return
+    }
+    if (moneyModalType === 'emi') {
+      if (!entryDueDate) {
+        setCloudError('Enter an EMI start date.')
+        return
+      }
+      if (!emiEndDate) {
+        setCloudError('Enter an EMI end date.')
+        return
+      }
+      if (emiEndDate < entryDueDate) {
+        setCloudError('EMI end date must be on or after its start date.')
+        return
+      }
+    }
+    if (moneyModalType === 'transaction' && entryType !== 'Income' && (!reason || !entryCategory)) {
+      setCloudError('Enter a spending reason and payment source.')
+      return
+    }
     const id = editingCommitmentId || window.crypto.randomUUID()
     setCloudError('')
     setCloudLoading(true)
     try {
       if (moneyModalType === 'emi') {
-        if (!entryDueDate) return
-        const draft = { id, name, amount, dueDay: Number(entryDueDate.slice(-2)), startDate: entryDueDate }
+        const draft = { id, name, amount, dueDay: Number(entryDueDate.slice(-2)), startDate: entryDueDate, endDate: emiEndDate, isCompleted: emiCompleted }
         const result = editingCommitmentId
           ? await supabase.from('emis').update({
             name,
             monthly_emi: amount,
             due_day: draft.dueDay,
             start_date: draft.startDate,
+            end_date: draft.endDate,
+            is_completed: draft.isCompleted,
           }).eq('id', editingCommitmentId).eq('user_id', session.user.id).select().single()
           : await supabase.from('emis').insert(toEmiRow(draft, session.user.id)).select().single()
         if (result.error) throw result.error
@@ -1428,8 +1535,7 @@ function App() {
           setCards((current) => [...current, savedCard])
         }
       } else {
-        if (entryType !== 'Income' && (!reason || !entryCategory)) return
-        const updatedEntry = { id: editingTransactionId || id, name, reason, amount, date: entryDate, type: entryType, category: entryType === 'Income' ? '' : entryCategory, cardName: entryType === 'Income' ? '' : entryCard }
+        const updatedEntry = { id: editingTransactionId || id, name, reason, amount, date: entryDate, type: entryType, category: entryType === 'Income' ? '' : entryCategory, cardName: entryType === 'Income' ? '' : entryCard, holdingId: transactions.find((entry) => entry.id === editingTransactionId)?.holdingId || '' }
         const row = toMoneyEntryRow(updatedEntry, cards, emis, session.user.id)
         const result = editingTransactionId
           ? await supabase.from('money_entries').update(row).eq('id', editingTransactionId).select().single()
@@ -1527,24 +1633,194 @@ function App() {
     }
   }
 
-  const deleteCard = async (card) => {
-    if (!window.confirm(`Delete "${card.name}" credit card? Its payment history will be kept.`)) return
-    if (!supabase || !session) return
-    setCloudError('')
+  const resetChitFundForm = () => {
+    setChitFundName('')
+    setChitFundMonthlyAmount('')
+    setChitFundStartDate('')
+    setChitFundEndDate('')
+    setEditingChitFundId(null)
+    setChitFundError('')
+    setChitFundFormOpen(false)
+  }
+
+  const editChitFund = (chitFund) => {
+    setChitFundName(chitFund.name)
+    setChitFundMonthlyAmount(String(chitFund.monthlyAmount))
+    setChitFundStartDate(chitFund.startDate)
+    setChitFundEndDate(chitFund.endDate)
+    setEditingChitFundId(chitFund.id)
+    setChitFundError('')
+    setChitFundFormOpen(true)
+  }
+
+  const saveChitFund = async (event) => {
+    event.preventDefault()
+    const name = chitFundName.trim()
+    const monthlyAmount = Number(chitFundMonthlyAmount)
+    if (!name || !Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
+      setChitFundError('Enter a chit fund name and a valid monthly amount.')
+      return
+    }
+    if (!chitFundStartDate || !chitFundEndDate || chitFundEndDate < chitFundStartDate) {
+      setChitFundError('Enter valid start and end dates. The end date must be on or after the start date.')
+      return
+    }
+    const existingChitFund = chitFunds.find((item) => item.id === editingChitFundId)
+    const allowedMonths = new Set(getMonthsInRange(chitFundStartDate, chitFundEndDate).map((month) => month.key))
+    if (existingChitFund?.paidMonths.some((payment) => !allowedMonths.has(payment.month))) {
+      setChitFundError('The selected date range must include all months already marked paid.')
+      return
+    }
+    if (!supabase || !session) {
+      setChitFundError('Sign in to save chit fund details.')
+      return
+    }
+
+    const draft = {
+      id: editingChitFundId || window.crypto.randomUUID(),
+      name,
+      monthlyAmount,
+      startDate: chitFundStartDate,
+      endDate: chitFundEndDate,
+      paidMonths: existingChitFund?.paidMonths || [],
+    }
+    setChitFundError('')
     setCloudLoading(true)
     try {
-      const { error: linkError } = await supabase.from('money_entries').update({ card_id: null }).eq('card_id', card.id)
-      if (linkError) throw linkError
-      const { error } = await supabase.from('cards').delete().eq('id', card.id)
-      if (error) throw error
-      setCards((current) => current.filter((entry) => entry.id !== card.id))
-      setTransactions((current) => current.map((entry) => (
-        entry.cardId === card.id ? { ...entry, cardId: '', cardName: '' } : entry
-      )))
-      setNotice('Credit card deleted from Supabase.')
+      const result = editingChitFundId
+        ? await supabase.from('cards').update(toChitFundRow(draft, session.user.id))
+          .eq('id', editingChitFundId).eq('user_id', session.user.id).select('*').single()
+        : await supabase.from('cards').insert(toChitFundRow(draft, session.user.id)).select('*').single()
+      if (result.error) throw result.error
+      const savedChitFund = fromChitFundRow(result.data)
+      setChitFunds((current) => editingChitFundId
+        ? current.map((item) => item.id === savedChitFund.id ? savedChitFund : item)
+        : [...current, savedChitFund])
+      setNotice(`Chit fund "${savedChitFund.name}" ${editingChitFundId ? 'updated' : 'added'}.`)
+      window.setTimeout(() => setNotice(''), 2600)
+      resetChitFundForm()
+    } catch (error) {
+      setChitFundError(`Could not save this chit fund: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const toggleChitFundMonth = async (chitFund, monthKey) => {
+    if (!supabase || !session) {
+      setChitFundError('Sign in to update chit fund payments.')
+      return
+    }
+    const monthsInRange = getMonthsInRange(chitFund.startDate, chitFund.endDate)
+    if (!monthsInRange.some((month) => month.key === monthKey)) {
+      setChitFundError('This month is outside the chit fund start and end dates.')
+      return
+    }
+
+    const existingPayment = chitFund.paidMonths.find((payment) => payment.month === monthKey)
+    setChitFundError('')
+    setCloudLoading(true)
+    try {
+      let savedChitFund
+      let savedEntry
+      if (existingPayment) {
+        const remainingPaidMonths = chitFund.paidMonths.filter((payment) => payment.month !== monthKey)
+        const { data, error } = await supabase.from('cards')
+          .update({ paid_months: remainingPaidMonths })
+          .eq('id', chitFund.id)
+          .eq('user_id', session.user.id)
+          .select('*')
+          .single()
+        if (error) throw error
+        savedChitFund = fromChitFundRow(data)
+
+        if (existingPayment.moneyEntryId) {
+          const { error: deleteEntryError } = await supabase.from('money_entries')
+            .delete()
+            .eq('id', existingPayment.moneyEntryId)
+            .eq('user_id', session.user.id)
+          if (deleteEntryError) {
+            const { error: rollbackError } = await supabase.from('cards')
+              .update({ paid_months: chitFund.paidMonths })
+              .eq('id', chitFund.id)
+              .eq('user_id', session.user.id)
+            if (rollbackError) {
+              throw new Error(`Could not remove the chit fund spending entry: ${deleteEntryError.message}. Restoring its paid status also failed: ${rollbackError.message}`)
+            }
+            throw deleteEntryError
+          }
+          setTransactions((current) => current.filter((entry) => entry.id !== existingPayment.moneyEntryId))
+        }
+      } else {
+        const moneyEntryId = window.crypto.randomUUID()
+        const transactionId = (chitTransactionIds[`${chitFund.id}:${monthKey}`] || '').trim()
+        const draftEntry = {
+          id: moneyEntryId,
+          name: chitFund.name,
+          reason: `Chit fund payment${transactionId ? ` · Transaction ID: ${transactionId}` : ''}`,
+          amount: chitFund.monthlyAmount,
+          date: `${monthKey}-01`,
+          type: 'Spending',
+          category: 'Other spending',
+          cardName: '',
+        }
+        const entryResult = await supabase.from('money_entries')
+          .insert(toMoneyEntryRow(draftEntry, cards, emis, session.user.id))
+          .select('*')
+          .single()
+        if (entryResult.error) throw entryResult.error
+        savedEntry = fromMoneyEntryRow(entryResult.data, cards)
+
+        const paidMonths = [...chitFund.paidMonths, { month: monthKey, transactionId, moneyEntryId }]
+        const { data, error } = await supabase.from('cards')
+          .update({ paid_months: paidMonths })
+          .eq('id', chitFund.id)
+          .eq('user_id', session.user.id)
+          .select('*')
+          .single()
+        if (error) {
+          const { error: cleanupError } = await supabase.from('money_entries')
+            .delete()
+            .eq('id', moneyEntryId)
+            .eq('user_id', session.user.id)
+          if (cleanupError) {
+            throw new Error(`Could not mark the month paid: ${error.message}. The spending entry also could not be removed: ${cleanupError.message}`)
+          }
+          throw error
+        }
+        savedChitFund = fromChitFundRow(data)
+        setTransactions((current) => [savedEntry, ...current])
+      }
+      setChitFunds((current) => current.map((item) => item.id === savedChitFund.id ? savedChitFund : item))
+      setNotice(`${existingPayment ? 'Marked unpaid' : 'Payment recorded'} for ${chitFund.name} · ${new Date(`${monthKey}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}.`)
       window.setTimeout(() => setNotice(''), 2600)
     } catch (error) {
-      setCloudError(`Could not delete this credit card from Supabase: ${error.message}`)
+      setChitFundError(`Could not update this chit fund month: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteChitFund = async (chitFund) => {
+    if (!window.confirm(`Delete "${chitFund.name}" chit fund and its payment months? This cannot be undone.`)) return
+    if (!supabase || !session) {
+      setChitFundError('Sign in to delete this chit fund.')
+      return
+    }
+    setChitFundError('')
+    setCloudLoading(true)
+    try {
+      const { error } = await supabase.from('cards')
+        .delete()
+        .eq('id', chitFund.id)
+        .eq('user_id', session.user.id)
+      if (error) throw error
+      setChitFunds((current) => current.filter((item) => item.id !== chitFund.id))
+      if (editingChitFundId === chitFund.id) resetChitFundForm()
+      setNotice(`Deleted chit fund "${chitFund.name}".`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setChitFundError(`Could not delete this chit fund: ${error.message}`)
     } finally {
       setCloudLoading(false)
     }
@@ -1597,6 +1873,258 @@ function App() {
       window.setTimeout(() => setNotice(''), 2600)
     } catch (error) {
       setCloudError(`Could not remove this available credit card: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const resetHoldingForm = () => {
+    setHoldingFormOpen(false)
+    setEditingHoldingId(null)
+    setHoldingName('')
+    setHoldingFrequency('monthly')
+    setHoldingSipAmount('')
+    setHoldingCurrentValue('')
+    setHoldingError('')
+  }
+
+  const editHolding = (holding) => {
+    setHoldingFormOpen(true)
+    setEditingHoldingId(holding.id)
+    setHoldingName(holding.name)
+    setHoldingFrequency(holding.sip_frequency || 'monthly')
+    setHoldingSipAmount(holding.sip_frequency === 'daily' ? String(holding.daily_sip || '') : String(holding.monthly_sip || ''))
+    setHoldingCurrentValue(String(holding.current_value))
+    setHoldingError('')
+  }
+
+  const saveHolding = async (event) => {
+    event.preventDefault()
+    const name = holdingName.trim()
+    const sipAmount = holdingSipAmount === '' ? 0 : Number(holdingSipAmount)
+    const currentValue = Number(holdingCurrentValue)
+    if (!name || !Number.isFinite(sipAmount) || sipAmount < 0 || !Number.isFinite(currentValue) || currentValue < 0) {
+      setHoldingError('Enter a name and valid non-negative amounts.')
+      return
+    }
+    if (holdingFrequency === 'daily' && sipAmount <= 0) {
+      setHoldingError(`Enter a ${holdingFrequency} SIP amount greater than zero.`)
+      return
+    }
+    if (!supabase || !session) {
+      setHoldingError('Sign in to save holding details.')
+      return
+    }
+
+    setHoldingError('')
+    setCloudLoading(true)
+    try {
+      const values = {
+        name,
+        sip_frequency: holdingFrequency,
+        daily_sip: holdingFrequency === 'daily' ? sipAmount : 0,
+        monthly_sip: holdingFrequency === 'monthly' ? sipAmount : 0,
+        current_value: currentValue,
+      }
+      const result = editingHoldingId
+        ? await supabase.from('holdings').update(values).eq('id', editingHoldingId).eq('user_id', session.user.id)
+          .select('id, name, sip_frequency, daily_sip, monthly_sip, current_value, created_at').single()
+        : await supabase.from('holdings').insert({ ...values, user_id: session.user.id })
+          .select('id, name, sip_frequency, daily_sip, monthly_sip, current_value, created_at').single()
+      if (result.error) throw result.error
+
+      setHoldings((current) => editingHoldingId
+        ? current.map((holding) => holding.id === editingHoldingId ? result.data : holding)
+        : [result.data, ...current])
+      resetHoldingForm()
+      setNotice(editingHoldingId ? 'Holding updated.' : `Added "${name}" holding.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setHoldingError(`Could not save this holding: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteHolding = async (holding) => {
+    if (!window.confirm(`Delete "${holding.name}" holding details? Logged SIP payments will remain in monthly spending.`)) return
+    if (!supabase || !session) {
+      setHoldingError('Sign in to delete holding details.')
+      return
+    }
+
+    setHoldingError('')
+    setCloudLoading(true)
+    try {
+      const { error } = await supabase.from('holdings').delete()
+        .eq('id', holding.id)
+        .eq('user_id', session.user.id)
+      if (error) throw error
+      setHoldings((current) => current.filter((entry) => entry.id !== holding.id))
+      if (editingHoldingId === holding.id) resetHoldingForm()
+      setNotice(`Deleted "${holding.name}" holding.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setHoldingError(`Could not delete this holding: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const logHoldingPayment = async (holding) => {
+    if (!supabase || !session) {
+      setCloudError('Sign in to log an SIP payment.')
+      return
+    }
+    const isDaily = holding.sip_frequency === 'daily'
+    if (!isDaily && (holdingPaymentFormId !== holding.id || holdingPaymentFormMonth !== selectedMonthKey)) {
+      const existingPayment = transactions.find((entry) => entry.holdingId === holding.id && entry.date?.slice(0, 7) === selectedMonthKey)
+      setHoldingPaymentAmount(existingPayment ? String(existingPayment.amount) : '')
+      setHoldingPaymentFormId(holding.id)
+      setHoldingPaymentFormMonth(selectedMonthKey)
+      setCloudError('')
+      return
+    }
+
+    const monthIndex = selectedMonth ?? appDate.getMonth()
+    const monthKey = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`
+    const date = `${monthKey}-01`
+    const existingPayment = transactions.find((entry) => entry.holdingId === holding.id && entry.date?.slice(0, 7) === monthKey)
+    const daysInMonth = new Date(selectedYear, monthIndex + 1, 0).getDate()
+    const amount = isDaily ? Number(holding.daily_sip) * daysInMonth : Number(holdingPaymentAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setCloudError(isDaily
+        ? 'Add a valid daily SIP amount to this holding before marking the month complete.'
+        : 'Enter this month’s SIP payment amount.')
+      return
+    }
+    if (isDaily && existingPayment) {
+      setCloudError(`The SIP for ${monthNames[monthIndex]} ${selectedYear} is already marked complete.`)
+      return
+    }
+    const draft = {
+      id: existingPayment?.id || window.crypto.randomUUID(),
+      name: holding.name,
+      reason: `${isDaily ? 'Daily SIP' : 'SIP'} payment for ${holding.name}`,
+      amount,
+      date,
+      type: 'Spending',
+      category: 'Other spending',
+      cardName: '',
+      holdingId: holding.id,
+    }
+
+    setCloudError('')
+    setCloudLoading(true)
+    try {
+      const row = toMoneyEntryRow(draft, cards, emis, session.user.id)
+      const result = existingPayment
+        ? await supabase.from('money_entries').update(row).eq('id', existingPayment.id).eq('user_id', session.user.id).select().single()
+        : await supabase.from('money_entries').insert(row).select().single()
+      const { data, error } = result
+      if (error) throw error
+      const savedPayment = fromMoneyEntryRow(data, cards)
+      setTransactions((current) => existingPayment
+        ? current.map((entry) => entry.id === existingPayment.id ? savedPayment : entry)
+        : [savedPayment, ...current])
+      setHoldingPaymentFormId(null)
+      setHoldingPaymentFormMonth('')
+      setHoldingPaymentAmount('')
+      setNotice(`${isDaily ? `${daysInMonth} daily SIP payments` : 'SIP payment'} for "${holding.name}" added to ${monthNames[monthIndex]} ${selectedYear} spending.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setCloudError(`Could not log this SIP payment: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const resetSubscriptionForm = () => {
+    setSubscriptionFormOpen(false)
+    setSubscriptionName('')
+    setSubscriptionAmount('')
+    setSubscriptionStartDate('')
+    setSubscriptionEndDate('')
+    setEditingSubscriptionId(null)
+    setSubscriptionError('')
+  }
+
+  const editSubscription = (subscription) => {
+    setSubscriptionFormOpen(true)
+    setSubscriptionName(subscription.name)
+    setSubscriptionAmount(String(subscription.amount))
+    setSubscriptionStartDate(subscription.start_date)
+    setSubscriptionEndDate(subscription.end_date)
+    setEditingSubscriptionId(subscription.id)
+    setSubscriptionError('')
+  }
+
+  const saveSubscription = async (event) => {
+    event.preventDefault()
+    const name = subscriptionName.trim()
+    const amount = Number(subscriptionAmount)
+    if (!name || !Number.isFinite(amount) || amount <= 0 || !subscriptionStartDate || !subscriptionEndDate) {
+      setSubscriptionError('Enter a name, a valid amount, and both dates.')
+      return
+    }
+    if (subscriptionEndDate < subscriptionStartDate) {
+      setSubscriptionError('End date must be on or after the start date.')
+      return
+    }
+    if (!supabase || !session) {
+      setSubscriptionError('Sign in to save subscription details.')
+      return
+    }
+
+    setSubscriptionError('')
+    setCloudLoading(true)
+    try {
+      const values = {
+        name,
+        amount,
+        start_date: subscriptionStartDate,
+        end_date: subscriptionEndDate,
+      }
+      const result = editingSubscriptionId
+        ? await supabase.from('subscriptions').update(values).eq('id', editingSubscriptionId).eq('user_id', session.user.id)
+          .select('id, name, amount, start_date, end_date, created_at').single()
+        : await supabase.from('subscriptions').insert({ ...values, user_id: session.user.id })
+          .select('id, name, amount, start_date, end_date, created_at').single()
+      if (result.error) throw result.error
+
+      setSubscriptions((current) => editingSubscriptionId
+        ? current.map((subscription) => subscription.id === editingSubscriptionId ? result.data : subscription)
+        : [result.data, ...current])
+      resetSubscriptionForm()
+      setNotice(editingSubscriptionId ? 'Subscription updated.' : `Added "${name}" subscription.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setSubscriptionError(`Could not save this subscription: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteSubscription = async (subscription) => {
+    if (!window.confirm(`Delete "${subscription.name}" subscription details?`)) return
+    if (!supabase || !session) {
+      setSubscriptionError('Sign in to delete subscription details.')
+      return
+    }
+
+    setSubscriptionError('')
+    setCloudLoading(true)
+    try {
+      const { error } = await supabase.from('subscriptions').delete()
+        .eq('id', subscription.id)
+        .eq('user_id', session.user.id)
+      if (error) throw error
+      setSubscriptions((current) => current.filter((entry) => entry.id !== subscription.id))
+      if (editingSubscriptionId === subscription.id) resetSubscriptionForm()
+      setNotice(`Deleted "${subscription.name}" subscription.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setSubscriptionError(`Could not delete this subscription: ${error.message}`)
     } finally {
       setCloudLoading(false)
     }
@@ -1690,7 +2218,7 @@ function App() {
           setSelectedMonth(appDate.getMonth())
         },
       })),
-    ...emis
+    ...activeEmis
       .filter((emi) => `${emi.name} ${emi.category || ''}`.toLowerCase().includes(normalizedQuery))
       .map((emi) => ({
         key: `emi-${emi.id}`,
@@ -1709,7 +2237,7 @@ function App() {
   const monthDay = appDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
   const greeting = appDate.getHours() < 12 ? 'Good morning' : appDate.getHours() < 18 ? 'Good afternoon' : 'Good evening'
   const formatMoney = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', currencyDisplay: 'symbol', maximumFractionDigits: 0 }).format(amount)
-  const dueTomorrowNotifications = getDueTomorrowNotifications(emis, cards, notificationDate)
+  const dueTomorrowNotifications = getDueTomorrowNotifications(activeEmis, cards, notificationDate)
   const careerGoalItems = goals.filter((goal) => goal.category === 'Career & skills')
   const selectedCareerTopic = careerTopics.find((topic) => topic.id === selectedCareerTopicId) || null
   const careerTopicChildren = (parentId) => careerTopics
@@ -1946,7 +2474,7 @@ function App() {
               <span className="section-kicker">SUPABASE CONNECTION ISSUE</span>
               <h2>Couldn’t load your finance data</h2>
               <p className="cloud-error-message">{cloudLoadError}</p>
-              <p>Check that the Data API is enabled and your three tables have the expected columns and signed-in-user RLS policies.</p>
+              <p>Check that the Data API is enabled, the required finance, holdings, and subscriptions migrations have been applied, and the tables have signed-in-user RLS policies.</p>
               <button className="primary-button" onClick={() => { setCloudLoadError(''); setCloudRefreshCount((count) => count + 1) }}>Retry connection</button>
             </>}
           </section> : activePage === 'Money' && <section className="money-page">
@@ -2000,6 +2528,104 @@ function App() {
                 </div>
                 <div className="money-note"><Icon name="lock" size={14} /> Your entries are stored in Supabase. Other signed-in sessions update live when Realtime is enabled.</div>
               </section>
+              <section className="panel commitment-panel completed-emis-panel">
+                <div className="section-heading"><div><span className="section-kicker">FINISHED COMMITMENTS</span><h2>Completed EMIs <span className="heading-count">{completedEmis.length}</span></h2></div></div>
+                {completedEmis.length > 0
+                  ? <div className="completed-emi-list">{completedEmis.map((emi) => {
+                    const payments = transactions.filter((entry) => entry.category === 'EMI payment' && (entry.emiId === emi.id || (!entry.emiId && entry.name === emi.name)))
+                    const totalPaid = payments.reduce((total, entry) => total + Number(entry.amount), 0)
+                    return <article className="completed-emi-row" key={emi.id}>
+                      <span className="commitment-icon completed-emi-icon"><Icon name="check" size={16} /></span>
+                      <div className="completed-emi-details"><strong>{emi.name}</strong><span>Monthly EMI: <b>{formatMoney(Number(emi.amount))}</b></span><span>Due day: {emi.dueDay || '—'} · Start: {emi.startDate ? new Date(`${emi.startDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span>End: {emi.endDate ? new Date(`${emi.endDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span>{payments.length} {payments.length === 1 ? 'payment' : 'payments'} logged · {formatMoney(totalPaid)} paid</span></div>
+                      <span className="completed-emi-badge">Completed</span>
+                      <button type="button" className="transaction-edit commitment-edit" aria-label={`Edit completed EMI: ${emi.name}`} title="Edit completed EMI" disabled={cloudLoading} onClick={() => openEditCommitment('emi', emi)}><Icon name="edit" size={15} /></button>
+                    </article>
+                  })}</div>
+                  : <p className="commitment-empty">Completed EMIs will appear here. Edit an EMI and mark it as completed to move it to this section.</p>}
+              </section>
+              <section className="panel commitment-panel holdings-panel">
+                <div className="section-heading"><div><span className="section-kicker">INVESTMENTS</span><h2>Holdings and SIP <span className="heading-count">{holdings.length}</span></h2></div>{!holdingFormOpen && <button type="button" className="primary-button subscription-add-button" onClick={() => { resetHoldingForm(); setHoldingFormOpen(true) }} disabled={cloudLoading}><Icon name="plus" size={14} /> Add holding</button>}</div>
+                <div className="holding-summary">
+                  <div className="holding-total"><span>Total holdings value</span><strong>{formatMoney(totalHoldingsValue)}</strong></div>
+                  <div className="holding-total holding-monthly-sip-total"><span>Monthly SIP</span><strong>{formatMoney(totalMonthlySip)}</strong></div>
+                  <div className="holding-total emi-sip-total-badge" aria-label={`EMI plus SIP total: ${formatMoney(totalMonthlyEmi + totalMonthlySip)}, including ${formatMoney(totalMonthlyEmi)} EMI and ${formatMoney(totalMonthlySip)} SIP`}>
+                    <span>EMI + SIP</span>
+                    <strong>{formatMoney(totalMonthlyEmi + totalMonthlySip)}</strong>
+                    <small>{formatMoney(totalMonthlyEmi)} EMI + {formatMoney(totalMonthlySip)} SIP</small>
+                  </div>
+                </div>
+                {holdingFormOpen && <form className="subscription-form" onSubmit={saveHolding}>
+                  <label htmlFor="holding-name">Stock, fund, or SIP name</label>
+                  <input id="holding-name" type="text" maxLength={100} value={holdingName} onChange={(event) => setHoldingName(event.target.value)} placeholder="e.g. Index fund SIP" required disabled={cloudLoading} />
+                  <label htmlFor="holding-frequency">SIP frequency</label>
+                  <select id="holding-frequency" value={holdingFrequency} onChange={(event) => { setHoldingFrequency(event.target.value); setHoldingSipAmount('') }} disabled={cloudLoading}>
+                    <option value="monthly">Monthly</option>
+                    <option value="daily">Daily</option>
+                  </select>
+                  <label htmlFor="holding-sip-amount">{holdingFrequency === 'daily' ? 'Daily SIP amount (₹)' : 'Monthly SIP amount (₹)'}</label>
+                  <input id="holding-sip-amount" type="number" min={holdingFrequency === 'daily' ? '0.01' : '0'} step="0.01" value={holdingSipAmount} onChange={(event) => setHoldingSipAmount(event.target.value)} placeholder="0.00" required disabled={cloudLoading} />
+                  <label htmlFor="holding-current-value">Current holdings value (₹)</label>
+                  <input id="holding-current-value" type="number" min="0" step="0.01" value={holdingCurrentValue} onChange={(event) => setHoldingCurrentValue(event.target.value)} placeholder="0.00" required disabled={cloudLoading} />
+                  {holdingError && <p className="subscription-error" role="alert">{holdingError}</p>}
+                  <div className="subscription-form-actions">
+                    <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name={editingHoldingId ? 'check' : 'plus'} size={14} /> {cloudLoading ? 'Saving…' : editingHoldingId ? 'Save changes' : 'Add holding'}</button>
+                    <button className="small-action" type="button" onClick={resetHoldingForm} disabled={cloudLoading}>Cancel</button>
+                  </div>
+                </form>}
+                {holdings.length > 0
+                  ? <div className="subscription-list">{holdings.map((holding) => {
+                    const holdingPayment = transactions.find((entry) => entry.holdingId === holding.id && entry.date?.slice(0, 7) === selectedMonthKey)
+                    const paymentFormOpen = holdingPaymentFormId === holding.id && holdingPaymentFormMonth === selectedMonthKey
+                    return <article className="subscription-row holding-row" key={holding.id}>
+                    <span className="commitment-icon holding-icon"><Icon name="income" size={16} /></span>
+                    <div className="subscription-details">
+                      <strong>{holding.name}</strong>
+                      <span className={`holding-sip-badge ${holding.sip_frequency === 'daily' ? 'holding-sip-badge-daily' : 'holding-sip-badge-monthly'}`}>{holding.sip_frequency === 'daily' ? `Daily SIP: ${formatMoney(Number(holding.daily_sip))}` : `Monthly SIP: ${formatMoney(Number(holding.monthly_sip))}`}</span>
+                      {holding.sip_frequency === 'daily' && <span>{new Date(selectedYear, activeMonthIndex + 1, 0).getDate()} days · Full month: <b>{formatMoney(Number(holding.daily_sip) * new Date(selectedYear, activeMonthIndex + 1, 0).getDate())}</b></span>}
+                      <span>Current holdings: <b>{formatMoney(Number(holding.current_value))}</b></span>
+                      {holdingPayment && <span>{monthNames[activeMonthIndex]} SIP: <b>{formatMoney(Number(holdingPayment.amount))}</b></span>}
+                    </div>
+                    {holding.sip_frequency === 'daily'
+                      ? <button type="button" className={`small-action holding-payment-button${holdingPayment ? ' payment-logged' : ''}`} onClick={() => logHoldingPayment(holding)} disabled={cloudLoading || Boolean(holdingPayment)}>{holdingPayment ? `${monthNames[activeMonthIndex]} completed` : `Mark ${monthNames[activeMonthIndex]} done`}</button>
+                    : <button type="button" className={`small-action holding-payment-button${holdingPayment ? ' payment-logged' : ''}`} onClick={() => logHoldingPayment(holding)} disabled={cloudLoading}>{paymentFormOpen ? 'Save monthly SIP' : holdingPayment ? 'Edit monthly SIP' : 'Log monthly SIP'}</button>}
+                    <button type="button" className="transaction-edit commitment-edit" aria-label={`Edit holding: ${holding.name}`} title="Edit holding" disabled={cloudLoading} onClick={() => editHolding(holding)}><Icon name="edit" size={15} /></button>
+                    <button type="button" className="transaction-delete commitment-delete" aria-label={`Delete holding: ${holding.name}`} title="Delete holding" disabled={cloudLoading} onClick={() => deleteHolding(holding)}><Icon name="trash" size={15} /></button>
+                    {holding.sip_frequency !== 'daily' && paymentFormOpen && <div className="holding-month-payment">
+                      <label htmlFor={`holding-payment-${holding.id}`}>{monthNames[activeMonthIndex]} SIP amount (₹)</label>
+                      <input id={`holding-payment-${holding.id}`} type="number" min="0.01" step="0.01" value={holdingPaymentAmount} onChange={(event) => setHoldingPaymentAmount(event.target.value)} placeholder="Enter this month’s amount" disabled={cloudLoading} />
+                      <button type="button" className="small-action" onClick={() => { setHoldingPaymentFormId(null); setHoldingPaymentFormMonth(''); setHoldingPaymentAmount('') }} disabled={cloudLoading}>Cancel</button>
+                    </div>}
+                  </article>})}</div>
+                  : <p className="commitment-empty">Add a stock or holding to track its monthly SIP and current value.</p>}
+                <p className="holding-spending-note">Monthly SIPs are entered separately for each selected month. Daily SIPs are calculated using that month’s exact day count. Logged payments appear in spending, not income.</p>
+              </section>
+              <section className="panel commitment-panel subscriptions-panel">
+                <div className="section-heading"><div><span className="section-kicker">RECURRING SERVICES</span><h2>Subscriptions <span className="heading-count">{subscriptions.length}</span></h2></div>{!subscriptionFormOpen && <button type="button" className="primary-button subscription-add-button" onClick={() => { resetSubscriptionForm(); setSubscriptionFormOpen(true) }} disabled={cloudLoading}><Icon name="plus" size={14} /> Add subscription</button>}</div>
+                {subscriptionFormOpen && <form className="subscription-form" onSubmit={saveSubscription}>
+                  <label htmlFor="subscription-name">Subscription name</label>
+                  <input id="subscription-name" type="text" maxLength={100} value={subscriptionName} onChange={(event) => setSubscriptionName(event.target.value)} placeholder="e.g. Streaming service" required disabled={cloudLoading} />
+                  <label htmlFor="subscription-amount">Amount (₹)</label>
+                  <input id="subscription-amount" type="number" min="0.01" step="0.01" value={subscriptionAmount} onChange={(event) => setSubscriptionAmount(event.target.value)} placeholder="0.00" required disabled={cloudLoading} />
+                  <div className="subscription-date-fields">
+                    <div><label htmlFor="subscription-start-date">Start date</label><input id="subscription-start-date" type="date" value={subscriptionStartDate} onChange={(event) => setSubscriptionStartDate(event.target.value)} required disabled={cloudLoading} /></div>
+                    <div><label htmlFor="subscription-end-date">End date</label><input id="subscription-end-date" type="date" min={subscriptionStartDate || undefined} value={subscriptionEndDate} onChange={(event) => setSubscriptionEndDate(event.target.value)} required disabled={cloudLoading} /></div>
+                  </div>
+                  <div className="subscription-form-actions">
+                    <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name={editingSubscriptionId ? 'check' : 'plus'} size={14} /> {cloudLoading ? 'Saving…' : editingSubscriptionId ? 'Save changes' : 'Add subscription'}</button>
+                    <button className="small-action" type="button" onClick={resetSubscriptionForm} disabled={cloudLoading}>Cancel</button>
+                  </div>
+                </form>}
+                {subscriptionError && <p className="subscription-error" role="alert">{subscriptionError}</p>}
+                {subscriptions.length > 0
+                  ? <div className="subscription-list">{subscriptions.map((subscription) => <article className="subscription-row" key={subscription.id}>
+                    <span className="commitment-icon subscription-icon"><Icon name="clock" size={16} /></span>
+                    <div className="subscription-details"><strong>{subscription.name}</strong><span>Start: {new Date(`${subscription.start_date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span><span>End: {new Date(`${subscription.end_date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div>
+                    <strong className="subscription-amount">{formatMoney(Number(subscription.amount))}</strong>
+                    <button type="button" className="transaction-edit commitment-edit" aria-label={`Edit subscription: ${subscription.name}`} title="Edit subscription" disabled={cloudLoading} onClick={() => editSubscription(subscription)}><Icon name="edit" size={15} /></button>
+                    <button type="button" className="transaction-delete commitment-delete" aria-label={`Delete subscription: ${subscription.name}`} title="Delete subscription" disabled={cloudLoading} onClick={() => deleteSubscription(subscription)}><Icon name="trash" size={15} /></button>
+                  </article>)}</div>
+                  : <p className="commitment-empty">Add subscriptions to keep their amount and active dates together.</p>}
+              </section>
               <section className="panel commitment-panel available-cards-panel">
                 <div className="section-heading"><div><span className="section-kicker">AVAILABLE CREDIT CARDS</span><h2>Credit cards available <span className="heading-count">{availableCards.length}</span></h2></div></div>
                 <form className="available-card-form" onSubmit={addAvailableCard}>
@@ -2014,30 +2640,81 @@ function App() {
 
               <div className="commitments-column">
                 <section className="panel commitment-panel">
-                  <div className="section-heading"><div><span className="section-kicker">MONTHLY COMMITMENTS</span><h2>EMIs <span className="heading-count">{emis.length}</span></h2></div><button className="round-arrow" aria-label="Add EMI" onClick={() => openMoneyForm('emi')}><Icon name="plus" size={16} /></button></div>
-                  {emis.map((emi) => {
+                  <div className="section-heading"><div><span className="section-kicker">MONTHLY COMMITMENTS</span><h2>EMIs <span className="heading-count">{activeEmis.length}</span></h2></div><button className="round-arrow" aria-label="Add EMI" onClick={() => openMoneyForm('emi')}><Icon name="plus" size={16} /></button></div>
+                  <div className="commitment-summary" aria-label={`EMI summary for ${monthNames[activeMonthIndex]} ${selectedYear}`}>
+                    <div className="commitment-summary-card commitment-summary-total"><span>Total EMI</span><strong>{formatMoney(totalMonthlyEmi)}</strong></div>
+                    <div className="commitment-summary-card commitment-summary-paid"><span>Paid · {monthNames[activeMonthIndex]}</span><strong>{formatMoney(totalMonthlyEmiPayments)}</strong></div>
+                    <div className="commitment-summary-card commitment-summary-remaining"><span>Remaining</span><strong>{formatMoney(remainingMonthlyEmi)}</strong></div>
+                  </div>
+                  {activeEmis.map((emi) => {
                     const payments = monthTransactions.filter((entry) => entry.category === 'EMI payment' && (entry.emiId === emi.id || (!entry.emiId && entry.name === emi.name)))
                     return <article className="commitment-item" key={emi.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>{formatMoney(Number(emi.amount))} / month · Due day {emi.dueDay || '—'}</span></div><button className="small-action" onClick={() => recordCommitmentPayment('EMI payment', emi)}>Log payment</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit EMI: ${emi.name}`} title="Edit EMI" disabled={cloudLoading} onClick={() => openEditCommitment('emi', emi)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
-                      {payments.length > 0 && <div className="commitment-activity">{payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> Paid {formatMoney(Number(payment.amount))} on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>)}</div>}
+                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>Due day {emi.dueDay || '—'}</span><span className="emi-date-line">Start: {emi.startDate ? new Date(`${emi.startDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span className="emi-date-line">End: {emi.endDate ? new Date(`${emi.endDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><strong className="commitment-amount"><small>MONTHLY</small>{formatMoney(Number(emi.amount))}</strong></div><button className={`small-action${payments.length ? ' payment-logged' : ''}`} onClick={() => recordCommitmentPayment('EMI payment', emi)}>{payments.length ? 'Log another payment' : 'Log payment'}</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit EMI: ${emi.name}`} title="Edit EMI" disabled={cloudLoading} onClick={() => openEditCommitment('emi', emi)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
+                      {payments.length > 0 && <div className="commitment-activity">{payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> Paid <strong>{formatMoney(Number(payment.amount))}</strong> on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>)}</div>}
                     </article>
                   })}
-                  {emis.length === 0 && <p className="commitment-empty">Add each current EMI with its monthly amount and due day to see all your commitments here.</p>}
+                  {activeEmis.length === 0 && <p className="commitment-empty">Add each current EMI with its monthly amount and due day to see all your commitments here.</p>}
                   <button className="commitment-add" onClick={() => openMoneyForm('emi')}><Icon name="plus" size={14} /> Add current EMI</button>
                 </section>
-                <section className="panel commitment-panel">
-                  <div className="section-heading"><div><span className="section-kicker">CARDS & REPAYMENTS</span><h2>Card tracking <span className="heading-count">{cards.length}</span></h2></div><button className="round-arrow" aria-label="Add credit card" onClick={() => openMoneyForm('card')}><Icon name="plus" size={16} /></button></div>
-                  {cardsWithBalances.map((card) => {
-                    const payments = monthTransactions.filter((entry) => (entry.category === 'Credit card payment' || entry.category === 'Card repayment') && (entry.cardName === card.name || entry.name === card.name))
-                    return <article className="commitment-item" key={card.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-card"><Icon name="card" size={16} /></span><div><strong>{card.name}</strong><span>{card.dueDay ? `Due day ${card.dueDay} · ` : ''}Balance {formatMoney(card.amount)}</span></div><button className="small-action" onClick={() => { setEntryName(card.name); setEntryReason(`Payment toward ${card.name} credit card`); setEntryAmount(String(card.amount || '')); setEntryType('Spending'); setEntryCategory('Card repayment'); setEntryCard(card.name); setEntryDate(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && selectedMonth === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`); setMoneyModalType('transaction'); setMoneyModalOpen(true) }}>Record repayment</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit credit card: ${card.name}`} title="Edit credit card" disabled={cloudLoading} onClick={() => openEditCommitment('card', card)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete credit card: ${card.name}`} title="Delete credit card" disabled={cloudLoading} onClick={() => deleteCard(card)}><Icon name="trash" size={15} /></button></div>
-                      <div className="commitment-activity">{payments.length ? payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> {payment.category}: {formatMoney(Number(payment.amount))} · {payment.reason}</span>) : <span className="no-activity">No card payment logged for {monthNames[selectedMonth]}.</span>}</div>
-                    </article>
-                  })}
-                  {cards.length === 0 && <p className="commitment-empty">Add your cards so purchases and repayments are easy to organize.</p>}
-                  <button className="commitment-add" onClick={() => openMoneyForm('card')}><Icon name="plus" size={14} /> Add credit card</button>
-                </section>
-                <section className="money-tip"><Icon name="spark" size={16} /><p><strong>A note on card payments</strong>Track a card purchase and its repayment as separate entries. Repayments are shown separately so the same spending is not counted twice.</p></section>
+                  <section className="panel commitment-panel chit-fund-panel">
+                    <div className="section-heading"><div><span className="section-kicker">MONTHLY CONTRIBUTIONS</span><h2>Chit fund <span className="heading-count">{chitFunds.length}</span></h2></div>{!chitFundFormOpen && <button type="button" className="primary-button subscription-add-button" onClick={() => { setChitFundError(''); setChitFundFormOpen(true) }} disabled={cloudLoading}><Icon name="plus" size={14} /> Add</button>}</div>
+                    <div className="chit-fund-current-total"><span>Current holding</span><strong>{formatMoney(totalChitFundHolding)}</strong></div>
+                    {chitFundFormOpen && <form className="subscription-form chit-fund-form" onSubmit={saveChitFund}>
+                      <label htmlFor="chit-fund-name">Chit fund name</label>
+                      <input id="chit-fund-name" type="text" maxLength={100} value={chitFundName} onChange={(event) => setChitFundName(event.target.value)} placeholder="Enter chit fund name" required disabled={cloudLoading} />
+                      <label htmlFor="chit-fund-amount">Monthly amount (₹)</label>
+                      <input id="chit-fund-amount" type="number" min="0.01" step="0.01" value={chitFundMonthlyAmount} onChange={(event) => setChitFundMonthlyAmount(event.target.value)} placeholder="0.00" required disabled={cloudLoading} />
+                      <div className="subscription-date-fields">
+                        <div><label htmlFor="chit-fund-start-date">Start date</label><input id="chit-fund-start-date" type="date" value={chitFundStartDate} onChange={(event) => setChitFundStartDate(event.target.value)} required disabled={cloudLoading} /></div>
+                        <div><label htmlFor="chit-fund-end-date">End date</label><input id="chit-fund-end-date" type="date" min={chitFundStartDate || undefined} value={chitFundEndDate} onChange={(event) => setChitFundEndDate(event.target.value)} required disabled={cloudLoading} /></div>
+                      </div>
+                      {chitFundError && <p className="subscription-error" role="alert">{chitFundError}</p>}
+                      <div className="subscription-form-actions">
+                        <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name={editingChitFundId ? 'check' : 'plus'} size={14} /> {cloudLoading ? 'Saving…' : editingChitFundId ? 'Save changes' : 'Add chit fund'}</button>
+                        <button className="small-action" type="button" onClick={resetChitFundForm} disabled={cloudLoading}>Cancel</button>
+                      </div>
+                    </form>}
+                    {chitFundError && !chitFundFormOpen && <p className="subscription-error" role="alert">{chitFundError}</p>}
+                    {chitFunds.length > 0
+                      ? <div className="chit-fund-list">{chitFunds.map((chitFund) => {
+                        const months = getMonthsInRange(chitFund.startDate, chitFund.endDate)
+                        const paymentsByMonth = new Map(chitFund.paidMonths.map((payment) => [payment.month, payment]))
+                        const paidCount = months.filter((month) => paymentsByMonth.has(month.key)).length
+                        const remainingCount = months.length - paidCount
+                        const currentHolding = paidCount * chitFund.monthlyAmount
+                        return <article className="chit-fund-item" key={chitFund.id}>
+                          <div className="chit-fund-heading">
+                            <div><strong>{chitFund.name}</strong><span>{formatMoney(chitFund.monthlyAmount)} per month · {chitFund.startDate} – {chitFund.endDate}</span></div>
+                            <div className="chit-fund-actions">
+                              <button type="button" className="transaction-edit commitment-edit" aria-label={`Edit chit fund: ${chitFund.name}`} title="Edit chit fund" disabled={cloudLoading} onClick={() => editChitFund(chitFund)}><Icon name="edit" size={15} /></button>
+                              <button type="button" className="transaction-delete commitment-delete" aria-label={`Delete chit fund: ${chitFund.name}`} title="Delete chit fund" disabled={cloudLoading} onClick={() => deleteChitFund(chitFund)}><Icon name="trash" size={15} /></button>
+                            </div>
+                          </div>
+                          <div className="chit-fund-stats">
+                            <span>Current holding <b>{formatMoney(currentHolding)}</b></span>
+                            <span>Paid <b>{paidCount} / {months.length} months</b></span>
+                            <span>Remaining <b>{remainingCount} {remainingCount === 1 ? 'month' : 'months'}</b></span>
+                          </div>
+                          <details className="chit-months-accordion">
+                            <summary><span>Monthly payments</span><strong>{paidCount} of {months.length} paid</strong></summary>
+                            <div className="chit-month-list">
+                              {months.map((month) => {
+                                const payment = paymentsByMonth.get(month.key)
+                                const transactionInputId = `chit-transaction-${chitFund.id}-${month.key}`
+                                return <div className={`chit-month-row${payment ? ' chit-month-paid' : ''}`} key={month.key}>
+                                  <span className="chit-month-name">{month.label}</span>
+                                  {payment
+                                    ? <span className="chit-month-payment">{payment.transactionId ? `Transaction ID: ${payment.transactionId}` : 'Payment recorded'} · Added to spending</span>
+                                    : <label className="chit-transaction-field" htmlFor={transactionInputId}><span>Transaction ID (optional)</span><input id={transactionInputId} type="text" maxLength={100} value={chitTransactionIds[`${chitFund.id}:${month.key}`] || ''} onChange={(event) => setChitTransactionIds((current) => ({ ...current, [`${chitFund.id}:${month.key}`]: event.target.value }))} placeholder="Optional" disabled={cloudLoading} /></label>}
+                                  <button type="button" className={`small-action chit-month-button${payment ? ' payment-logged' : ''}`} onClick={() => toggleChitFundMonth(chitFund, month.key)} disabled={cloudLoading}>{payment ? 'Mark unpaid' : 'Mark paid'}</button>
+                                </div>
+                              })}
+                            </div>
+                          </details>
+                        </article>
+                      })}</div>
+                      : <p className="commitment-empty">Add a chit fund to track its monthly payments and remaining months.</p>}
+                  </section>
               </div>
             </div>
             </>}
@@ -2139,6 +2816,8 @@ function App() {
                 <button type="button" className="transaction-delete" aria-label={`Delete trip: ${selectedTrip.title}`} title="Delete trip" disabled={deletingTripIds.includes(selectedTrip.id)} onClick={() => deleteTrip(selectedTrip)}><Icon name="trash" size={16} /></button>
               </div>
               <form className="trip-detail-form" onSubmit={saveTrip}>
+                <label htmlFor="trip-name">Trip name</label>
+                <input id="trip-name" type="text" maxLength={100} value={tripTitle} onChange={(event) => { setTripTitle(event.target.value); setTripMediaError('') }} required disabled={tripSaving} />
                 <label htmlFor="trip-date">Trip date</label>
                 <input id="trip-date" type="text" maxLength={100} value={tripDate} onChange={(event) => setTripDate(event.target.value)} placeholder="e.g. 12–15 June 2026 or Summer 2026" disabled={tripSaving} />
                 <label htmlFor="trip-notes">A little note</label>
@@ -2168,7 +2847,7 @@ function App() {
                   </div>
                 </div>}
                 {!tripMediaLoading && !tripMediaError && tripCarouselItems.length === 0 && <p className="trip-empty-media">Add photos or videos to see your trip memories here.</p>}
-                <button type="submit" className="primary-button trip-save-button" disabled={tripSaving}><Icon name="check" size={16} /> {tripSaving ? 'Saving trip…' : 'Save memories'}</button>
+                <button type="submit" className="primary-button trip-save-button" disabled={tripSaving}><Icon name="check" size={16} /> {tripSaving ? 'Saving trip…' : 'Save changes'}</button>
               </form>
             </> : <>
               <div className="section-heading trips-heading">
@@ -2328,9 +3007,17 @@ function App() {
           <label htmlFor="entry-amount">{moneyModalType === 'card' ? editingCommitmentId ? 'Opening balance' : 'Current balance (optional)' : moneyModalType === 'emi' ? 'Monthly payment amount (₹)' : 'Amount (₹)'}</label>
           <input id="entry-amount" type="number" min={moneyModalType === 'card' ? '0' : '0.01'} step="0.01" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} placeholder="0.00" required={moneyModalType !== 'card'} />
           {moneyModalType === 'transaction' && <><label htmlFor="entry-date">Date</label><input id="entry-date" type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} required /></>}
-          {moneyModalType === 'emi' && <><label htmlFor="entry-due-date">First EMI due date <span>REQUIRED</span></label><input id="entry-due-date" type="date" value={entryDueDate} onChange={(event) => setEntryDueDate(event.target.value)} required /><p className="form-hint">The day of this date is used as the EMI due day.</p></>}
+          {moneyModalType === 'emi' && <>
+            <label htmlFor="entry-due-date">Start date <span>REQUIRED</span></label>
+            <input id="entry-due-date" type="date" value={entryDueDate} onChange={(event) => setEntryDueDate(event.target.value)} required />
+            <p className="form-hint">The start date’s day of the month is used as the EMI due day.</p>
+            <label htmlFor="emi-end-date">End date <span>REQUIRED</span></label>
+            <input id="emi-end-date" type="date" min={entryDueDate || undefined} value={emiEndDate} onChange={(event) => setEmiEndDate(event.target.value)} required />
+          </>}
+          {moneyModalType === 'emi' && editingCommitmentId && <label className="emi-completed-toggle" htmlFor="emi-completed"><input id="emi-completed" type="checkbox" checked={emiCompleted} onChange={(event) => setEmiCompleted(event.target.checked)} /><span>Mark this EMI as completed</span></label>}
           {moneyModalType === 'card' && <><label htmlFor="entry-due">Payment due day</label><input id="entry-due" type="number" min="1" max="31" value={entryDueDay} onChange={(event) => setEntryDueDay(event.target.value)} placeholder="Day of month, e.g. 15" /></>}
-          <button type="submit" className="primary-button modal-submit"><Icon name="check" size={16} /> {moneyModalType === 'transaction' ? editingTransactionId ? 'Save changes' : 'Save entry' : editingCommitmentId ? 'Save changes' : moneyModalType === 'emi' ? 'Save EMI reminder' : 'Save card'}</button>
+          {cloudError && <p className="cloud-inline-error money-modal-error" role="alert">{cloudError}</p>}
+          <button type="submit" className="primary-button modal-submit" disabled={cloudLoading}><Icon name={cloudLoading ? 'clock' : 'check'} size={16} /> {cloudLoading ? 'Saving…' : moneyModalType === 'transaction' ? editingTransactionId ? 'Save changes' : 'Save entry' : editingCommitmentId ? 'Save changes' : moneyModalType === 'emi' ? 'Save EMI reminder' : 'Save card'}</button>
         </form>
       </div>}
       {addTripOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !tripSaving) setAddTripOpen(false) }}>

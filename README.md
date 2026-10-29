@@ -14,6 +14,16 @@ Trips are saved in the private `trips` table with free-text trip dates, short no
 
 Available credit card names are stored separately from cards used for payment tracking. Run [`supabase/migrations/20261028000004_available_credit_cards.sql`](./supabase/migrations/20261028000004_available_credit_cards.sql) in the Supabase SQL Editor to set up the private, user-scoped list.
 
+EMI completion status is stored on the existing `emis` table; no new table is required. Run [`supabase/migrations/20261029000000_emi_completion.sql`](./supabase/migrations/20261029000000_emi_completion.sql) in the Supabase SQL Editor to enable marking EMIs as completed.
+
+EMI records include a start date and due day; an end date is stored on the same table. Run [`supabase/migrations/20261029000002_emi_end_date.sql`](./supabase/migrations/20261029000002_emi_end_date.sql) in the Supabase SQL Editor to add the end-date column.
+
+Subscriptions are stored per user with an amount, start date, and end date. Run [`supabase/migrations/20261029000001_subscriptions.sql`](./supabase/migrations/20261029000001_subscriptions.sql) in the Supabase SQL Editor to enable the subscriptions section.
+
+Holdings are stored per user with a monthly or daily SIP and current value. Run [`supabase/migrations/20261029000003_holdings.sql`](./supabase/migrations/20261029000003_holdings.sql) and [`supabase/migrations/20261029000004_holdings_sip_frequency.sql`](./supabase/migrations/20261029000004_holdings_sip_frequency.sql) in the Supabase SQL Editor to enable the holdings section. The Monthly SIP summary totals each monthly amount and calculates daily SIPs at 30 days. Monthly SIP payments are entered separately for each selected month; daily SIP completion calculates the daily amount times the number of days in the selected month. Both are saved as spending entries in the existing money ledger.
+
+Chit funds reuse the existing `cards` table; no new table is created. Run [`supabase/migrations/20261029000005_chit_funds.sql`](./supabase/migrations/20261029000005_chit_funds.sql) in the Supabase SQL Editor to add chit fund details and paid-month records. Chit fund months expand and collapse individually. Marking a month paid adds its monthly amount as spending in the existing money ledger and stores the resulting ledger entry ID with that month's record; marking it unpaid removes that linked spending entry. An optional transaction ID is saved with each paid month.
+
 Career & skills topics, nested subtopics, and notes are stored in the private `career_skill_topics` table. Run [`supabase/migrations/20261028000005_career_skill_topics.sql`](./supabase/migrations/20261028000005_career_skill_topics.sql) in the Supabase SQL Editor to enable the learning workspace.
 
 Currently, two official plugins are available:
