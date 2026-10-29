@@ -129,6 +129,7 @@ export function toEmiRow(emi, userId) {
     start_date: emi.startDate || null,
     end_date: emi.endDate || null,
     is_completed: Boolean(emi.isCompleted),
+    monthly_payments: emi.monthlyPayments || [],
   }
 }
 
@@ -141,6 +142,16 @@ export function fromEmiRow(row) {
     startDate: row.start_date || '',
     endDate: row.end_date || '',
     isCompleted: row.is_completed === true,
+    monthlyPayments: Array.isArray(row.monthly_payments)
+      ? row.monthly_payments.filter((payment) => (
+        payment && typeof payment.month === 'string' && /^\d{4}-\d{2}$/.test(payment.month)
+      )).map((payment) => ({
+        month: payment.month,
+        amount: Number(payment.amount) || 0,
+        date: typeof payment.date === 'string' ? payment.date : `${payment.month}-01`,
+        moneyEntryId: typeof payment.moneyEntryId === 'string' ? payment.moneyEntryId : '',
+      }))
+      : [],
   }
 }
 

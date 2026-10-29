@@ -722,12 +722,16 @@ function App() {
   }, 0)
   const activeEmis = emis.filter((emi) => !emi.isCompleted)
   const completedEmis = emis.filter((emi) => emi.isCompleted)
-  const monthlyEmiPayments = monthTransactions.filter((entry) => entry.category === 'EMI payment')
   const totalMonthlyEmi = activeEmis.reduce((total, emi) => total + Number(emi.amount), 0)
-  const totalMonthlyEmiPayments = monthlyEmiPayments
-    .filter((payment) => activeEmis.some((emi) => payment.emiId === emi.id || (!payment.emiId && payment.name === emi.name)))
-    .reduce((total, payment) => total + Number(payment.amount), 0)
-  const remainingMonthlyEmi = Math.max(0, totalMonthlyEmi - totalMonthlyEmiPayments)
+  const emiPaymentTotals = activeEmis.map((emi) => {
+    const paid = emi.monthlyPayments
+      .filter((payment) => payment.month === selectedMonthKey)
+      .reduce((total, payment) => total + Number(payment.amount), 0)
+    const credited = Math.min(Number(emi.amount), paid)
+    return { credited, remaining: Math.max(0, Number(emi.amount) - credited) }
+  })
+  const totalMonthlyEmiPayments = emiPaymentTotals.reduce((total, payment) => total + payment.credited, 0)
+  const remainingMonthlyEmi = emiPaymentTotals.reduce((total, payment) => total + payment.remaining, 0)
   const totalIncome = monthTransactions.filter((entry) => entry.type === 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const totalOutgoings = monthTransactions.filter((entry) => entry.type !== 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const remainingMonthlyBalance = totalIncome - totalOutgoings
@@ -1566,12 +1570,20 @@ function App() {
   }
 
   const recordCommitmentPayment = async (type, commitment) => {
-    if (!supabase || !session) return
+    if (!supabase || !session) {
+      setCloudError('Sign in to log a commitment payment.')
+      return
+    }
+    const targetEmi = type === 'EMI payment' ? emis.find((emi) => emi.id === commitment.id) : null
+    if (type === 'EMI payment' && !targetEmi) {
+      setCloudError('The EMI could not be found. Refresh your finance data and try again.')
+      return
+    }
     const draft = {
       id: window.crypto.randomUUID(),
       name: commitment.name,
       amount: Number(commitment.amount),
-      date: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && selectedMonth === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`,
+      date: `${selectedYear}-${String(activeMonthIndex + 1).padStart(2, '0')}-${selectedYear === appDate.getFullYear() && activeMonthIndex === appDate.getMonth() ? String(appDate.getDate()).padStart(2, '0') : '01'}`,
       type: 'Spending',
       category: type === 'EMI payment' ? 'EMI payment' : 'Card repayment',
       reason: `${type} for ${commitment.name}`,
@@ -1583,7 +1595,33 @@ function App() {
     try {
       const { data, error } = await supabase.from('money_entries').insert(toMoneyEntryRow(draft, cards, emis, session.user.id)).select().single()
       if (error) throw error
-      setTransactions((current) => [fromMoneyEntryRow(data, cards), ...current])
+      const savedEntry = fromMoneyEntryRow(data, cards)
+      if (targetEmi) {
+        const month = draft.date.slice(0, 7)
+        const monthlyPayments = [
+          ...targetEmi.monthlyPayments,
+          { month, amount: draft.amount, date: draft.date, moneyEntryId: draft.id },
+        ]
+        const { data: emiRow, error: emiError } = await supabase.from('emis')
+          .update({ monthly_payments: monthlyPayments })
+          .eq('id', targetEmi.id)
+          .eq('user_id', session.user.id)
+          .select('*')
+          .single()
+        if (emiError) {
+          const { error: cleanupError } = await supabase.from('money_entries')
+            .delete()
+            .eq('id', draft.id)
+            .eq('user_id', session.user.id)
+          if (cleanupError) {
+            throw new Error(`Could not update the EMI payment summary: ${emiError.message}. The spending entry also could not be removed: ${cleanupError.message}`)
+          }
+          throw emiError
+        }
+        const savedEmi = fromEmiRow(emiRow)
+        setEmis((current) => current.map((emi) => emi.id === savedEmi.id ? savedEmi : emi))
+      }
+      setTransactions((current) => [savedEntry, ...current])
       setNotice(`${type} saved to Supabase.`)
       window.setTimeout(() => setNotice(''), 2600)
     } catch (error) {
@@ -2533,8 +2571,8 @@ function App() {
                 <div className="section-heading"><div><span className="section-kicker">FINISHED COMMITMENTS</span><h2>Completed EMIs <span className="heading-count">{completedEmis.length}</span></h2></div></div>
                 {completedEmis.length > 0
                   ? <div className="completed-emi-list">{completedEmis.map((emi) => {
-                    const payments = transactions.filter((entry) => entry.category === 'EMI payment' && (entry.emiId === emi.id || (!entry.emiId && entry.name === emi.name)))
-                    const totalPaid = payments.reduce((total, entry) => total + Number(entry.amount), 0)
+                  const payments = emi.monthlyPayments
+                  const totalPaid = payments.reduce((total, payment) => total + Number(payment.amount), 0)
                     return <article className="completed-emi-row" key={emi.id}>
                       <span className="commitment-icon completed-emi-icon"><Icon name="check" size={16} /></span>
                       <div className="completed-emi-details"><strong>{emi.name}</strong><span>Monthly EMI: <b>{formatMoney(Number(emi.amount))}</b></span><span>Due day: {emi.dueDay || '—'} · Start: {emi.startDate ? new Date(`${emi.startDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span>End: {emi.endDate ? new Date(`${emi.endDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span>{payments.length} {payments.length === 1 ? 'payment' : 'payments'} logged · {formatMoney(totalPaid)} paid</span></div>
@@ -2648,10 +2686,10 @@ function App() {
                     <div className="commitment-summary-card commitment-summary-remaining"><span>Remaining</span><strong>{formatMoney(remainingMonthlyEmi)}</strong></div>
                   </div>
                   {activeEmis.map((emi) => {
-                    const payments = monthTransactions.filter((entry) => entry.category === 'EMI payment' && (entry.emiId === emi.id || (!entry.emiId && entry.name === emi.name)))
+                    const payments = emi.monthlyPayments.filter((payment) => payment.month === selectedMonthKey)
                     return <article className="commitment-item" key={emi.id}>
-                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>Due day {emi.dueDay || '—'}</span><span className="emi-date-line">Start: {emi.startDate ? new Date(`${emi.startDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span className="emi-date-line">End: {emi.endDate ? new Date(`${emi.endDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><strong className="commitment-amount"><small>MONTHLY</small>{formatMoney(Number(emi.amount))}</strong></div><button className={`small-action${payments.length ? ' payment-logged' : ''}`} onClick={() => recordCommitmentPayment('EMI payment', emi)}>{payments.length ? 'Log another payment' : 'Log payment'}</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit EMI: ${emi.name}`} title="Edit EMI" disabled={cloudLoading} onClick={() => openEditCommitment('emi', emi)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
-                      {payments.length > 0 && <div className="commitment-activity">{payments.map((payment) => <span key={payment.id}><Icon name="check" size={12} /> Paid <strong>{formatMoney(Number(payment.amount))}</strong> on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>)}</div>}
+                      <div className="commitment-row"><span className="commitment-icon commitment-emi"><Icon name="clock" size={16} /></span><div><strong>{emi.name}</strong><span>Due day {emi.dueDay || '—'}</span><span className="emi-date-line">Start: {emi.startDate ? new Date(`${emi.startDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><span className="emi-date-line">End: {emi.endDate ? new Date(`${emi.endDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span><strong className="commitment-amount"><small>MONTHLY</small>{formatMoney(Number(emi.amount))}</strong></div><button className={`small-action${payments.length ? ' payment-logged' : ''}`} onClick={() => recordCommitmentPayment('EMI payment', emi)} disabled={cloudLoading}>{payments.length ? 'Log another payment' : 'Log payment'}</button><button type="button" className="transaction-edit commitment-edit" aria-label={`Edit EMI: ${emi.name}`} title="Edit EMI" disabled={cloudLoading} onClick={() => openEditCommitment('emi', emi)}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete commitment-delete" aria-label={`Delete monthly commitment: ${emi.name}`} title="Delete monthly commitment" disabled={cloudLoading} onClick={() => deleteEmi(emi)}><Icon name="trash" size={15} /></button></div>
+                      {payments.length > 0 && <div className="commitment-activity">{payments.map((payment) => <span key={`${payment.month}:${payment.moneyEntryId || payment.date}`}><Icon name="check" size={12} /> Paid <strong>{formatMoney(Number(payment.amount))}</strong> on {new Date(`${payment.date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>)}</div>}
                     </article>
                   })}
                   {activeEmis.length === 0 && <p className="commitment-empty">Add each current EMI with its monthly amount and due day to see all your commitments here.</p>}
