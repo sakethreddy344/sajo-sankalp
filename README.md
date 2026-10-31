@@ -2,6 +2,8 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
+The account profile menu lets you view the profile photo larger or replace it. A selected photo is resized and stored in this browser only.
+
 ## Business exploration notes
 
 Business exploration notes are saved per idea in the `business_exploration_notes` Supabase table. Attached images are stored in the private `business-exploration-images` Storage bucket; the table keeps their paths. Row-level security policies restrict notes and images to their signed-in owner.
@@ -11,6 +13,10 @@ Before using this feature, run [`supabase/migrations/20261028000000_business_exp
 Personal & life goal notes are saved in the separate `personal_life_notes` table and use the same private image bucket. After setting up business exploration notes, run [`supabase/migrations/20261028000001_personal_life_notes.sql`](./supabase/migrations/20261028000001_personal_life_notes.sql) in the Supabase SQL Editor.
 
 Trips are saved in the private `trips` table with free-text trip dates, short notes, and media paths. Photos and videos are stored in the private `trip-memories` bucket (10 MB per photo, 50 MB per video). Run [`supabase/migrations/20261028000002_trips.sql`](./supabase/migrations/20261028000002_trips.sql) in the Supabase SQL Editor to set up the table, storage policies, and Realtime publication. If that migration was already applied, also run [`supabase/migrations/20261028000003_trip_date.sql`](./supabase/migrations/20261028000003_trip_date.sql) to add the trip date column.
+
+The Trips section includes a places wishlist stored in the existing `trips` table; no new table is created. Wishlist places support notes and a completion checkbox, with completed places highlighted separately. Run [`supabase/migrations/20261031000001_trip_place_wishlist.sql`](./supabase/migrations/20261031000001_trip_place_wishlist.sql) after the trips migration to add the wishlist flags.
+
+Trips also includes one saved packing checklist and a password-gated Important documents area; both reuse the existing `trips` table, with attachments in the private `important-documents` Storage bucket. Run [`supabase/migrations/20261031000002_trip_checklist_documents.sql`](./supabase/migrations/20261031000002_trip_checklist_documents.sql) after the wishlist migration. Documents support PDF, common image, text/CSV, Word, and Excel files up to 25 MB. The password prompt verifies the signed-in account's current password and is an additional UI check, not file encryption; private Storage policies continue to enforce account ownership.
 
 Available credit card names are stored separately from cards used for payment tracking. Run [`supabase/migrations/20261028000004_available_credit_cards.sql`](./supabase/migrations/20261028000004_available_credit_cards.sql) in the Supabase SQL Editor to set up the private, user-scoped list.
 
@@ -25,6 +31,10 @@ Subscriptions are stored per user with an amount, start date, and end date. Run 
 Holdings are stored per user with a monthly or daily SIP and current value. Run [`supabase/migrations/20261029000003_holdings.sql`](./supabase/migrations/20261029000003_holdings.sql) and [`supabase/migrations/20261029000004_holdings_sip_frequency.sql`](./supabase/migrations/20261029000004_holdings_sip_frequency.sql) in the Supabase SQL Editor to enable the holdings section. The Monthly SIP summary totals each monthly amount and calculates daily SIPs at 30 days. Monthly SIP payments are entered separately for each selected month; daily SIP completion calculates the daily amount times the number of days in the selected month. Both are saved as spending entries in the existing money ledger.
 
 Chit funds reuse the existing `cards` table; no new table is created. Run [`supabase/migrations/20261029000005_chit_funds.sql`](./supabase/migrations/20261029000005_chit_funds.sql) in the Supabase SQL Editor to add chit fund details and paid-month records. Chit fund months expand and collapse individually. Marking a month paid adds its monthly amount as spending in the existing money ledger and stores the resulting ledger entry ID with that month's record; marking it unpaid removes that linked spending entry. An optional transaction ID is saved with each paid month.
+
+The Money section's Dashboard button opens month-specific budget, cash-flow, spending-by-payment-source, and payment-reminder insights. Choose a month in the month overview to update the dashboard. Monthly budgets are saved in the current browser; the other insights use existing Supabase finance records.
+
+Gifts & occasions and Recipe ideas are available as shortcuts in Personal & life. Gifts & occasions stores people, dates, gift ideas, and celebration plans; annual occasions appear on their next date, and occasions due tomorrow appear in notifications. Recipe ideas stores ingredients, methods, and notes for recipes to try or make again; it is not a meal planner. Run [`supabase/migrations/20261031000000_gifts_and_recipes.sql`](./supabase/migrations/20261031000000_gifts_and_recipes.sql) in the Supabase SQL Editor to set up both private, user-scoped collections.
 
 Career & skills topics, nested subtopics, and notes are stored in the private `career_skill_topics` table. Run [`supabase/migrations/20261028000005_career_skill_topics.sql`](./supabase/migrations/20261028000005_career_skill_topics.sql) in the Supabase SQL Editor to enable the learning workspace.
 

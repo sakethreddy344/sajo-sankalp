@@ -11,6 +11,21 @@ const tripMediaBucket = 'trip-memories'
 const maxTripPhotoSize = 10 * 1024 * 1024
 const maxTripVideoSize = 50 * 1024 * 1024
 const maxTripMedia = 30
+const importantDocumentBucket = 'important-documents'
+const maxImportantDocumentSize = 25 * 1024 * 1024
+const importantDocumentTypes = {
+  'application/pdf': 'pdf',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+}
 const tripMediaTypes = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -26,6 +41,7 @@ const noteTableByType = {
 }
 const maxBusinessImageSize = 5 * 1024 * 1024
 const maxBusinessImages = 8
+const occasionTypes = ['Birthday', 'Anniversary', 'Special occasion', 'Other']
 
 function formatMoney(amount) {
   return new Intl.NumberFormat('en-IN', {
@@ -126,7 +142,7 @@ function getLoginStreak(activityDates, today) {
   return streak
 }
 
-function getDueTomorrowNotifications(emis, cards, today) {
+function getDueTomorrowNotifications(emis, cards, today, occasions = []) {
   const tomorrow = new Date(`${today}T00:00:00`)
   tomorrow.setDate(tomorrow.getDate() + 1)
   const lastDayOfMonth = new Date(tomorrow.getFullYear(), tomorrow.getMonth() + 1, 0).getDate()
@@ -146,6 +162,17 @@ function getDueTomorrowNotifications(emis, cards, today) {
       title: `${card.name} payment is due tomorrow`,
       detail: `Credit card · Due day ${card.dueDay}`,
       type: 'Card',
+    })),
+    ...occasions.filter((occasion) => {
+      const occasionDate = new Date(`${occasion.occasion_date}T00:00:00`)
+      return occasion.repeats_annually
+        ? occasionDate.getMonth() === tomorrow.getMonth() && occasionDate.getDate() === tomorrowDay
+        : occasion.occasion_date === dateInputValue(tomorrow)
+    }).map((occasion) => ({
+      id: `occasion-${occasion.id}`,
+      title: `${occasion.person_name}’s ${occasion.occasion_type.toLowerCase()} is tomorrow`,
+      detail: occasion.gift_ideas ? `Gift idea: ${occasion.gift_ideas.split('\n')[0]}` : 'Open Gifts & occasions to see your notes',
+      type: 'Occasion',
     })),
   ]
 }
@@ -237,8 +264,12 @@ function App() {
   const [subscriptionFormOpen, setSubscriptionFormOpen] = useState(false)
   const [subscriptionError, setSubscriptionError] = useState('')
   const [completedDays, setCompletedDays] = usePersistentState('daymark-habits', [])
+  const [monthlyBudgets, setMonthlyBudgets] = usePersistentState('daymark-monthly-budgets', {})
   const [selectedYear, setSelectedYear] = useState(appDate.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(null)
+  const [moneyDashboardOpen, setMoneyDashboardOpen] = useState(false)
+  const [budgetDraft, setBudgetDraft] = useState('')
+  const [budgetError, setBudgetError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [moneyModalOpen, setMoneyModalOpen] = useState(false)
   const [moneyModalType, setMoneyModalType] = useState('transaction')
@@ -307,6 +338,57 @@ function App() {
   const [tripMediaReload, setTripMediaReload] = useState(0)
   const [tripCarouselIndex, setTripCarouselIndex] = useState(0)
   const [tripCarouselExpanded, setTripCarouselExpanded] = useState(false)
+  const [wishlistOpen, setWishlistOpen] = useState(false)
+  const [wishlistFormOpen, setWishlistFormOpen] = useState(false)
+  const [wishlistEditingId, setWishlistEditingId] = useState('')
+  const [wishlistPlaceName, setWishlistPlaceName] = useState('')
+  const [wishlistPlaceNotes, setWishlistPlaceNotes] = useState('')
+  const [wishlistSaving, setWishlistSaving] = useState(false)
+  const [wishlistError, setWishlistError] = useState('')
+  const [packingChecklistOpen, setPackingChecklistOpen] = useState(false)
+  const [packingChecklistNotes, setPackingChecklistNotes] = useState('')
+  const [packingChecklistSaving, setPackingChecklistSaving] = useState(false)
+  const [packingChecklistError, setPackingChecklistError] = useState('')
+  const [documentsOpen, setDocumentsOpen] = useState(false)
+  const [documentsUnlocked, setDocumentsUnlocked] = useState(false)
+  const [documentsUnlockedUserId, setDocumentsUnlockedUserId] = useState('')
+  const [documentPassword, setDocumentPassword] = useState('')
+  const [documentAuthError, setDocumentAuthError] = useState('')
+  const [documentAuthLoading, setDocumentAuthLoading] = useState(false)
+  const [documentFormOpen, setDocumentFormOpen] = useState(false)
+  const [editingDocumentId, setEditingDocumentId] = useState('')
+  const [documentFile, setDocumentFile] = useState(null)
+  const [documentName, setDocumentName] = useState('')
+  const [documentSaving, setDocumentSaving] = useState(false)
+  const [documentError, setDocumentError] = useState('')
+  const [documentView, setDocumentView] = useState('all')
+  const [selectedDocumentIndex, setSelectedDocumentIndex] = useState(0)
+  const [signedDocument, setSignedDocument] = useState(null)
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false)
+  const [occasions, setOccasions] = useState([])
+  const [occasionError, setOccasionError] = useState('')
+  const [occasionSaving, setOccasionSaving] = useState(false)
+  const [occasionFormOpen, setOccasionFormOpen] = useState(false)
+  const [editingOccasionId, setEditingOccasionId] = useState('')
+  const [occasionPerson, setOccasionPerson] = useState('')
+  const [occasionType, setOccasionType] = useState('Birthday')
+  const [occasionDate, setOccasionDate] = useState('')
+  const [occasionRelationship, setOccasionRelationship] = useState('')
+  const [occasionGiftIdeas, setOccasionGiftIdeas] = useState('')
+  const [occasionPlans, setOccasionPlans] = useState('')
+  const [occasionRepeats, setOccasionRepeats] = useState(true)
+  const [recipes, setRecipes] = useState([])
+  const [recipesError, setRecipesError] = useState('')
+  const [personalCollectionsReload, setPersonalCollectionsReload] = useState(0)
+  const [personalCollectionsLoadedKey, setPersonalCollectionsLoadedKey] = useState('')
+  const [recipeSaving, setRecipeSaving] = useState(false)
+  const [recipeFormOpen, setRecipeFormOpen] = useState(false)
+  const [editingRecipeId, setEditingRecipeId] = useState('')
+  const [recipeTitle, setRecipeTitle] = useState('')
+  const [recipeCategory, setRecipeCategory] = useState('')
+  const [recipeIngredients, setRecipeIngredients] = useState('')
+  const [recipeInstructions, setRecipeInstructions] = useState('')
+  const [recipeNotes, setRecipeNotes] = useState('')
   const [entryType, setEntryType] = useState('Spending')
   const [entryName, setEntryName] = useState('')
   const [entryReason, setEntryReason] = useState('')
@@ -326,11 +408,17 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [profileUser, setProfileUser] = useState(null)
+  const [profileAvatar, setProfileAvatar] = useState(() => window.localStorage.getItem('daymark-profile-avatar') || '/profile-avatar.png')
+  const [profileAvatarError, setProfileAvatarError] = useState('')
+  const [profileAvatarPreviewOpen, setProfileAvatarPreviewOpen] = useState(false)
+  const profileAvatarInputRef = useRef(null)
   const profileContainerRef = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const cloudRequestKey = session ? `${session.user.id}:${cloudRefreshCount}` : ''
   const cloudDataLoading = Boolean(session && cloudLoadedKey !== cloudRequestKey && !cloudLoadError)
+  const personalCollectionsKey = session ? `${session.user.id}:${personalCollectionsReload}` : ''
+  const personalCollectionsLoading = Boolean(session && personalCollectionsLoadedKey !== personalCollectionsKey)
 
   useEffect(() => {
     if (!supabaseConfigured || !supabase) {
@@ -350,6 +438,11 @@ function App() {
       if (authUserIdRef.current !== nextUserId) {
         setLoginStreak(null)
         setStreakError('')
+        setDocumentsOpen(false)
+        setDocumentsUnlocked(false)
+        setDocumentsUnlockedUserId('')
+        setDocumentPassword('')
+        setSignedDocument(null)
       }
       setStreakError('')
       if (authUserIdRef.current && authUserIdRef.current !== nextUserId) {
@@ -432,6 +525,8 @@ function App() {
         setCareerTopicsLoading(true)
         setCareerTopicsReload((count) => count + 1)
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gift_occasions', filter: `user_id=eq.${userId}` }, () => setPersonalCollectionsReload((count) => count + 1))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recipe_ideas', filter: `user_id=eq.${userId}` }, () => setPersonalCollectionsReload((count) => count + 1))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'emis', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'money_entries', filter: `user_id=eq.${userId}` }, refreshData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trips', filter: `user_id=eq.${userId}` }, () => setTripsReload((count) => count + 1))
@@ -558,7 +653,7 @@ function App() {
     const loadTrips = async () => {
       const { data, error } = await supabase
         .from('trips')
-        .select('id, title, trip_date, notes, media, created_at')
+        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
       if (error) throw error
@@ -583,6 +678,71 @@ function App() {
       active = false
     }
   }, [session, tripsReload])
+
+  useEffect(() => {
+    if (!documentsOpen || !documentsUnlocked || documentsUnlockedUserId !== session?.user?.id || documentView !== 'carousel' || !supabase || !session) return undefined
+
+    const documentRecords = trips.filter((trip) => trip.user_id === session.user.id && trip.is_important_document)
+    if (!documentRecords.length) return undefined
+
+    const selectedDocument = documentRecords[Math.min(selectedDocumentIndex, documentRecords.length - 1)]
+    const file = Array.isArray(selectedDocument.media) ? selectedDocument.media[0] : null
+    if (!file?.path) return undefined
+
+    let active = true
+    supabase.storage.from(importantDocumentBucket).createSignedUrl(file.path, 3600)
+      .then(({ data, error }) => {
+        if (error) throw error
+        if (active) {
+          setSignedDocument({ path: file.path, url: data.signedUrl })
+          setDocumentError('')
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setSignedDocument(null)
+          setDocumentError(`Could not open "${selectedDocument.title}": ${error.message}`)
+        }
+      })
+      .finally(() => {
+        if (active) setDocumentPreviewLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [documentsOpen, documentsUnlocked, documentsUnlockedUserId, documentView, session, trips, selectedDocumentIndex])
+
+  useEffect(() => {
+    let active = true
+    if (!session || !supabase) return undefined
+    const loadPersonalCollections = async () => {
+      const [occasionResult, recipeResult] = await Promise.all([
+        supabase.from('gift_occasions').select('*').eq('user_id', session.user.id).order('occasion_date'),
+        supabase.from('recipe_ideas').select('*').eq('user_id', session.user.id).order('updated_at', { ascending: false }),
+      ])
+      const failedResult = [occasionResult, recipeResult].find((result) => result.error)
+      if (failedResult?.error) throw failedResult.error
+      if (!active) return
+      setOccasions(occasionResult.data)
+      setRecipes(recipeResult.data)
+      setOccasionError('')
+      setRecipesError('')
+      setPersonalCollectionsLoadedKey(personalCollectionsKey)
+    }
+
+    loadPersonalCollections().catch((error) => {
+      if (!active) return
+      const message = `Could not load your saved items: ${error.message}`
+      setOccasionError(message)
+      setRecipesError(message)
+      setPersonalCollectionsLoadedKey(personalCollectionsKey)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [session, personalCollectionsKey])
 
   useEffect(() => {
     const handleSearchShortcut = (event) => {
@@ -744,6 +904,98 @@ function App() {
   const totalIncome = monthTransactions.filter((entry) => entry.type === 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const totalOutgoings = monthTransactions.filter((entry) => entry.type !== 'Income').reduce((total, entry) => total + Number(entry.amount), 0)
   const remainingMonthlyBalance = totalIncome - totalOutgoings
+  const monthlyBudget = Number(monthlyBudgets[selectedMonthKey]) || 0
+  const budgetRemaining = monthlyBudget - totalOutgoings
+  const budgetProgress = monthlyBudget > 0 ? Math.min((totalOutgoings / monthlyBudget) * 100, 100) : 0
+  const spendingByCategory = Object.values(monthTransactions
+    .filter((entry) => entry.type !== 'Income')
+    .reduce((categories, entry) => {
+      const category = entry.category || 'Other spending'
+      categories[category] = categories[category] || { name: category, total: 0 }
+      categories[category].total += Number(entry.amount) || 0
+      return categories
+    }, {}))
+    .sort((first, second) => second.total - first.total)
+  const selectedMonthDays = new Date(selectedYear, activeMonthIndex + 1, 0).getDate()
+  const selectedMonthStart = `${selectedMonthKey}-01`
+  const selectedMonthEnd = `${selectedMonthKey}-${String(selectedMonthDays).padStart(2, '0')}`
+  const selectedMonthIsCurrent = selectedMonthKey === notificationDate.slice(0, 7)
+  const dueDateForDay = (day) => `${selectedMonthKey}-${String(Math.min(Number(day), selectedMonthDays)).padStart(2, '0')}`
+  const scheduledPayments = [
+    ...activeEmis
+      .filter((emi) => Number(emi.dueDay) > 0
+        && (!emi.startDate || emi.startDate.slice(0, 7) <= selectedMonthKey)
+        && (!emi.endDate || emi.endDate.slice(0, 7) >= selectedMonthKey))
+      .map((emi) => {
+        const dueDate = dueDateForDay(emi.dueDay)
+        const paid = emi.monthlyPayments
+          .filter((payment) => payment.month === selectedMonthKey)
+          .reduce((total, payment) => total + Number(payment.amount), 0) >= Number(emi.amount)
+        return { id: `emi-${emi.id}`, name: emi.name, type: 'EMI', amount: Number(emi.amount), dueDate, paid }
+      }),
+    ...cards
+      .filter((card) => Number(card.dueDay) > 0)
+      .map((card) => {
+        const balance = transactions.reduce((total, entry) => {
+          if (entry.date > selectedMonthEnd || (entry.cardId !== card.id && entry.cardName !== card.name)) return total
+          if (entry.category === 'Credit card payment') return total + Number(entry.amount)
+          if (entry.category === 'Card repayment') return Math.max(0, total - Number(entry.amount))
+          return total
+        }, Number(card.amount) || 0)
+        return {
+          id: `card-${card.id}`,
+          name: card.name,
+          type: 'Credit card',
+          amount: balance,
+          dueDate: dueDateForDay(card.dueDay),
+          paid: false,
+          untracked: true,
+        }
+      })
+      .filter((payment) => payment.amount > 0),
+    ...subscriptions
+      .filter((subscription) => subscription.start_date <= selectedMonthEnd && subscription.end_date >= selectedMonthStart)
+      .map((subscription) => ({
+        id: `subscription-${subscription.id}`,
+        name: subscription.name,
+        type: 'Subscription',
+        amount: Number(subscription.amount),
+        dueDate: dueDateForDay(Number(subscription.start_date.slice(-2))),
+        paid: false,
+        untracked: true,
+      })),
+    ...holdings.map((holding) => {
+      const target = holding.sip_frequency === 'daily'
+        ? Number(holding.daily_sip || 0) * selectedMonthDays
+        : Number(holding.monthly_sip || 0)
+      const paid = transactions
+        .filter((entry) => entry.holdingId === holding.id && entry.date?.slice(0, 7) === selectedMonthKey)
+        .reduce((total, entry) => total + Number(entry.amount), 0)
+      return {
+        id: `holding-${holding.id}`,
+        name: holding.name,
+        type: 'SIP',
+        amount: target,
+        dueDate: dueDateForDay(1),
+        paid: target > 0 && paid >= target,
+      }
+    }).filter((payment) => payment.amount > 0),
+    ...chitFunds
+      .filter((chitFund) => selectedMonthKey >= chitFund.startDate.slice(0, 7)
+        && selectedMonthKey <= chitFund.endDate.slice(0, 7))
+      .map((chitFund) => ({
+        id: `chit-${chitFund.id}`,
+        name: chitFund.name,
+        type: 'Chit fund',
+        amount: Number(chitFund.monthlyAmount),
+        dueDate: dueDateForDay(Number(chitFund.startDate.slice(-2))),
+        paid: chitFund.paidMonths.some((payment) => payment.month === selectedMonthKey),
+      })),
+  ].sort((first, second) => first.dueDate.localeCompare(second.dueDate))
+  const monthlyCommitments = scheduledPayments
+    .filter((payment) => payment.type !== 'Credit card')
+    .reduce((total, payment) => total + payment.amount, 0)
+  const maxCashFlow = Math.max(totalIncome, totalOutgoings, 1)
   const monthlyTotals = monthNames.map((name, monthIndex) => {
     const key = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`
     const entries = yearTransactions.filter((entry) => entry.date?.slice(0, 7) === key)
@@ -755,6 +1007,18 @@ function App() {
     }
   })
   const availableYears = [...new Set([appDate.getFullYear() - 2, appDate.getFullYear() - 1, appDate.getFullYear(), appDate.getFullYear() + 1, appDate.getFullYear() + 2, ...transactions.map((entry) => Number(entry.date?.slice(0, 4))).filter(Number.isFinite)])].sort((a, b) => b - a)
+
+  const saveMonthlyBudget = (event) => {
+    event.preventDefault()
+    const amount = Number(budgetDraft)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setBudgetError('Enter a monthly budget greater than zero.')
+      return
+    }
+
+    setMonthlyBudgets((current) => ({ ...current, [selectedMonthKey]: amount }))
+    setBudgetError('')
+  }
 
   const submitAuth = async (event) => {
     event.preventDefault()
@@ -854,6 +1118,59 @@ function App() {
     loadProfile()
   }
 
+  const changeProfileAvatar = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    setProfileAvatarError('')
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setProfileAvatarError('Choose an image file.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setProfileAvatarError('Choose an image smaller than 10 MB.')
+      return
+    }
+
+    const imageUrl = URL.createObjectURL(file)
+    try {
+      const compressedImage = await new Promise((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => {
+          const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight))
+          const canvas = document.createElement('canvas')
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+          canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+          const context = canvas.getContext('2d')
+          if (!context) {
+            reject(new Error('Could not process this image.'))
+            return
+          }
+          context.drawImage(image, 0, 0, canvas.width, canvas.height)
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('Could not process this image.'))
+          }, 'image/jpeg', 0.84)
+        }
+        image.onerror = () => reject(new Error('Could not read this image.'))
+        image.src = imageUrl
+      })
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = () => reject(new Error('Could not read this image.'))
+        reader.readAsDataURL(compressedImage)
+      })
+      window.localStorage.setItem('daymark-profile-avatar', dataUrl)
+      setProfileAvatar(dataUrl)
+      setProfileAvatarError('')
+    } catch (error) {
+      setProfileAvatarError(`Could not save your profile photo: ${error.message}`)
+    } finally {
+      URL.revokeObjectURL(imageUrl)
+    }
+  }
+
   const downloadLocalFinanceBackup = () => {
     try {
       const backup = window.localStorage.getItem('daymark-pre-supabase-finance-v1')
@@ -898,8 +1215,92 @@ function App() {
 
   const openTrips = () => {
     setTripsError('')
+    setWishlistOpen(false)
     if (!tripsLoaded) setTripsLoading(true)
     setPersonalView('trips')
+  }
+
+  const resetWishlistForm = () => {
+    setWishlistEditingId('')
+    setWishlistPlaceName('')
+    setWishlistPlaceNotes('')
+    setWishlistError('')
+    setWishlistFormOpen(false)
+  }
+
+  const editWishlistPlace = (place) => {
+    setWishlistEditingId(place.id)
+    setWishlistPlaceName(place.title)
+    setWishlistPlaceNotes(place.notes || '')
+    setWishlistError('')
+    setWishlistFormOpen(true)
+  }
+
+  const saveWishlistPlace = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session) {
+      setWishlistError('Sign in to save wishlist places.')
+      return
+    }
+
+    const title = wishlistPlaceName.trim()
+    if (!title) {
+      setWishlistError('Enter a place name.')
+      return
+    }
+
+    setWishlistSaving(true)
+    setWishlistError('')
+    try {
+      const values = {
+        title,
+        trip_date: '',
+        notes: wishlistPlaceNotes.trim(),
+        is_wishlisted_place: true,
+        updated_at: new Date().toISOString(),
+      }
+      const result = wishlistEditingId
+        ? await supabase.from('trips').update(values).eq('id', wishlistEditingId).eq('user_id', session.user.id)
+          .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
+        : await supabase.from('trips').insert({ ...values, user_id: session.user.id })
+          .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
+      if (result.error) throw result.error
+      setTrips((current) => wishlistEditingId
+        ? current.map((place) => place.id === result.data.id ? result.data : place)
+        : [result.data, ...current])
+      setNotice(`"${title}" ${wishlistEditingId ? 'updated in' : 'added to'} your places wishlist.`)
+      window.setTimeout(() => setNotice(''), 2600)
+      resetWishlistForm()
+    } catch (error) {
+      setWishlistError(`Could not save this place: ${error.message}`)
+    } finally {
+      setWishlistSaving(false)
+    }
+  }
+
+  const toggleWishlistPlaceCompleted = async (place) => {
+    if (!supabase || !session) {
+      setWishlistError('Sign in to update wishlist places.')
+      return
+    }
+
+    setWishlistSaving(true)
+    setWishlistError('')
+    try {
+      const { data, error } = await supabase.from('trips')
+        .update({ is_completed: !place.is_completed })
+        .eq('id', place.id)
+        .eq('user_id', session.user.id)
+        .eq('is_wishlisted_place', true)
+        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at')
+        .single()
+      if (error) throw error
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+    } catch (error) {
+      setWishlistError(`Could not update "${place.title}": ${error.message}`)
+    } finally {
+      setWishlistSaving(false)
+    }
   }
 
   const openTrip = (trip) => {
@@ -940,7 +1341,9 @@ function App() {
         user_id: session.user.id,
         title,
         trip_date: date,
-      }).select('id, title, trip_date, notes, media, created_at').single()
+        is_wishlisted_place: false,
+        is_completed: false,
+      }).select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
       if (error) throw error
 
       setTrips((current) => [data, ...current])
@@ -957,13 +1360,21 @@ function App() {
   }
 
   const deleteTrip = async (trip) => {
-    if (!window.confirm(`Delete "${trip.title}" and all its saved memories? This cannot be undone.`)) return
+    const isWishlistPlace = Boolean(trip.is_wishlisted_place)
+    const recordName = isWishlistPlace ? 'Place' : 'Trip'
+    const confirmation = isWishlistPlace
+      ? `Remove "${trip.title}" from your places wishlist? This cannot be undone.`
+      : `Delete "${trip.title}" and all its saved memories? This cannot be undone.`
+    if (!window.confirm(confirmation)) return
     if (!supabase || !session) {
-      setTripsError('Sign in to delete this trip.')
+      const message = `Sign in to ${isWishlistPlace ? 'remove this place from your wishlist' : 'delete this trip'}.`
+      if (isWishlistPlace) setWishlistError(message)
+      else setTripsError(message)
       return
     }
 
     setTripsError('')
+    if (isWishlistPlace) setWishlistError('')
     setDeletingTripIds((current) => [...current, trip.id])
     try {
       const { error } = await supabase
@@ -992,15 +1403,285 @@ function App() {
       }
 
       if (cleanupError) {
-        setTripsError(`Trip "${trip.title}" was deleted, but its saved memories could not be removed from storage: ${cleanupError}`)
+        setTripsError(`${recordName} "${trip.title}" was deleted, but its saved memories could not be removed from storage: ${cleanupError}`)
       } else {
-        setNotice(`Trip "${trip.title}" and its memories were deleted.`)
+        setNotice(isWishlistPlace ? `"${trip.title}" was removed from your wishlist.` : `Trip "${trip.title}" and its memories were deleted.`)
         window.setTimeout(() => setNotice(''), 2600)
       }
     } catch (error) {
-      setTripsError(`Could not delete trip "${trip.title}": ${error.message}`)
+      const message = `Could not delete ${recordName.toLowerCase()} "${trip.title}": ${error.message}`
+      if (isWishlistPlace) setWishlistError(message)
+      else setTripsError(message)
     } finally {
       setDeletingTripIds((current) => current.filter((id) => id !== trip.id))
+    }
+  }
+
+  const openPackingChecklist = () => {
+    const checklist = trips.find((trip) => trip.user_id === session?.user?.id && trip.is_packing_checklist)
+    setPackingChecklistNotes(checklist?.notes || '')
+    setPackingChecklistError('')
+    setPackingChecklistOpen(true)
+  }
+
+  const savePackingChecklist = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session) {
+      setPackingChecklistError('Sign in to save your packing checklist.')
+      return
+    }
+
+    const existingChecklist = trips.find((trip) => trip.user_id === session.user.id && trip.is_packing_checklist)
+    setPackingChecklistSaving(true)
+    setPackingChecklistError('')
+    try {
+      const values = {
+        title: 'Packing checklist',
+        trip_date: '',
+        notes: packingChecklistNotes,
+        media: [],
+        is_wishlisted_place: false,
+        is_completed: false,
+        is_packing_checklist: true,
+        is_important_document: false,
+        updated_at: new Date().toISOString(),
+      }
+      const result = existingChecklist
+        ? await supabase.from('trips').update(values).eq('id', existingChecklist.id).eq('user_id', session.user.id)
+          .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
+        : await supabase.from('trips').insert({ ...values, user_id: session.user.id })
+          .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
+      if (result.error) throw result.error
+      setTrips((current) => existingChecklist
+        ? current.map((trip) => trip.id === result.data.id ? result.data : trip)
+        : [result.data, ...current])
+      setPackingChecklistOpen(false)
+      setNotice('Packing checklist saved.')
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setPackingChecklistError(`Could not save your packing checklist: ${error.message}`)
+    } finally {
+      setPackingChecklistSaving(false)
+    }
+  }
+
+  const verifyDocumentPassword = async (event) => {
+    event.preventDefault()
+    const password = documentPassword
+    setDocumentPassword('')
+    setDocumentAuthError('')
+    if (!supabase || !session?.user?.email) {
+      setDocumentAuthError('Could not verify the account password. Sign in again and retry.')
+      return
+    }
+
+    setDocumentAuthLoading(true)
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: session.user.email,
+        password,
+      })
+      if (error) throw error
+      setDocumentsUnlocked(true)
+      setDocumentsUnlockedUserId(session.user.id)
+      setDocumentView('all')
+      setSelectedDocumentIndex(0)
+      setDocumentFormOpen(false)
+      setDocumentFile(null)
+      setDocumentName('')
+      setDocumentError('')
+    } catch {
+      setDocumentAuthError('That password could not be verified. Please try again.')
+    } finally {
+      setDocumentAuthLoading(false)
+    }
+  }
+
+  const selectImportantDocument = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    setDocumentError('')
+    if (!file) {
+      setDocumentFile(null)
+      return
+    }
+    if (!Object.hasOwn(importantDocumentTypes, file.type)) {
+      setDocumentFile(null)
+      setDocumentError('Choose a PDF, image, text/CSV, Word, or Excel file.')
+    } else if (file.size > maxImportantDocumentSize) {
+      setDocumentFile(null)
+      setDocumentError('Each document must be 25 MB or smaller.')
+    } else {
+      setDocumentFile(file)
+      setDocumentName((current) => current.trim() ? current : file.name.replace(/\.[^.]+$/, ''))
+    }
+  }
+
+  const saveImportantDocument = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session || !documentsUnlocked || documentsUnlockedUserId !== session.user.id) {
+      setDocumentError('Unlock Important documents again before saving.')
+      return
+    }
+    const editingDocument = editingDocumentId
+      ? importantDocuments.find((document) => document.id === editingDocumentId)
+      : null
+    if (!documentFile && !editingDocument) {
+      setDocumentError('Choose a document to upload.')
+      return
+    }
+    const title = documentName.trim()
+    if (!title) {
+      setDocumentError('Enter a name for this document.')
+      return
+    }
+
+    setDocumentSaving(true)
+    setDocumentError('')
+    const existingFile = Array.isArray(editingDocument?.media) ? editingDocument.media[0] : null
+    const uploadedPath = documentFile
+      ? `${session.user.id}/${window.crypto.randomUUID()}.${importantDocumentTypes[documentFile.type]}`
+      : ''
+    try {
+      if (documentFile) {
+        const { error: uploadError } = await supabase.storage
+          .from(importantDocumentBucket)
+          .upload(uploadedPath, documentFile, { contentType: documentFile.type, upsert: false })
+        if (uploadError) throw uploadError
+      }
+
+      const values = {
+        title,
+        media: documentFile
+          ? [{ path: uploadedPath, name: documentFile.name, type: documentFile.type }]
+          : editingDocument.media,
+      }
+      const result = editingDocument
+        ? await supabase.from('trips').update(values).eq('id', editingDocument.id).eq('user_id', session.user.id)
+          .eq('is_important_document', true)
+          .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
+        : await supabase.from('trips').insert({
+          ...values,
+          user_id: session.user.id,
+          trip_date: '',
+          notes: '',
+          is_wishlisted_place: false,
+          is_completed: false,
+          is_packing_checklist: false,
+          is_important_document: true,
+        }).select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at').single()
+      const { data, error } = result
+      if (error) throw error
+
+      setTrips((current) => editingDocument
+        ? current.map((trip) => trip.id === data.id ? data : trip)
+        : [data, ...current])
+      let cleanupNotice = ''
+      if (documentFile && existingFile?.path) {
+        try {
+          const { error: cleanupError } = await supabase.storage.from(importantDocumentBucket).remove([existingFile.path])
+          if (cleanupError) cleanupNotice = ` The document was updated, but its previous file could not be removed: ${cleanupError.message}`
+        } catch (cleanupError) {
+          cleanupNotice = ` The document was updated, but its previous file could not be removed: ${cleanupError.message}`
+        }
+      }
+      setDocumentFile(null)
+      setDocumentName('')
+      setEditingDocumentId('')
+      setDocumentFormOpen(false)
+      setDocumentView(editingDocument ? 'all' : 'carousel')
+      setSelectedDocumentIndex(0)
+      setDocumentPreviewLoading(!editingDocument)
+      setNotice(`${editingDocument ? 'Important document updated.' : 'Important document saved.'}${cleanupNotice}`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      let cleanupMessage = ''
+      if (uploadedPath) {
+        try {
+          const { error: cleanupError } = await supabase.storage.from(importantDocumentBucket).remove([uploadedPath])
+          if (cleanupError) cleanupMessage = ` The uploaded file could not be cleaned up: ${cleanupError.message}`
+        } catch (cleanupError) {
+          cleanupMessage = ` The uploaded file could not be cleaned up: ${cleanupError.message}`
+        }
+      }
+      setDocumentError(`Could not save this document: ${error.message}${cleanupMessage}`)
+    } finally {
+      setDocumentSaving(false)
+    }
+  }
+
+  const closeImportantDocuments = () => {
+    setDocumentsOpen(false)
+    setDocumentsUnlocked(false)
+    setDocumentsUnlockedUserId('')
+    setDocumentPassword('')
+    setDocumentAuthError('')
+    setDocumentFormOpen(false)
+    setEditingDocumentId('')
+    setDocumentFile(null)
+    setDocumentView('all')
+    setSelectedDocumentIndex(0)
+    setSignedDocument(null)
+    setDocumentPreviewLoading(false)
+    setDocumentError('')
+  }
+
+  const editImportantDocument = (document) => {
+    const file = Array.isArray(document.media) ? document.media[0] : null
+    setEditingDocumentId(document.id)
+    setDocumentName(document.title || file?.name?.replace(/\.[^.]+$/, '') || '')
+    setDocumentFile(null)
+    setDocumentError('')
+    setDocumentFormOpen(true)
+    setDocumentView('all')
+  }
+
+  const deleteImportantDocument = async (document) => {
+    if (!window.confirm(`Delete "${document.title}" and its attachment? This cannot be undone.`)) return
+    if (!supabase || !session || !documentsAreUnlocked || documentsUnlockedUserId !== session.user.id) {
+      setDocumentError('Unlock Important documents again before deleting.')
+      return
+    }
+
+    setDocumentSaving(true)
+    setDocumentError('')
+    try {
+      const { error } = await supabase.from('trips').delete()
+        .eq('id', document.id)
+        .eq('user_id', session.user.id)
+        .eq('is_important_document', true)
+        .select('id')
+        .single()
+      if (error) throw error
+
+      setTrips((current) => current.filter((trip) => trip.id !== document.id))
+      if (editingDocumentId === document.id) {
+        setEditingDocumentId('')
+        setDocumentFormOpen(false)
+        setDocumentFile(null)
+        setDocumentName('')
+      }
+      setSelectedDocumentIndex(0)
+      setDocumentView('all')
+
+      const paths = (Array.isArray(document.media) ? document.media : [])
+        .map((file) => file?.path)
+        .filter((path) => typeof path === 'string' && path.length > 0)
+      if (paths.length) {
+        try {
+          const { error: removeError } = await supabase.storage.from(importantDocumentBucket).remove(paths)
+          if (removeError) throw removeError
+        } catch (error) {
+          setDocumentError(`"${document.title}" was deleted, but its attachment could not be removed from storage: ${error.message}`)
+          return
+        }
+      }
+      setNotice(`"${document.title}" was deleted.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setDocumentError(`Could not delete "${document.title}": ${error.message}`)
+    } finally {
+      setDocumentSaving(false)
     }
   }
 
@@ -1065,7 +1746,7 @@ function App() {
         .update({ title, trip_date: tripDate.trim(), notes: tripNotes, media, updated_at: new Date().toISOString() })
         .eq('id', selectedTrip.id)
         .eq('user_id', session.user.id)
-        .select('id, title, trip_date, notes, media, created_at')
+        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at')
         .single()
       if (error) throw error
 
@@ -2178,6 +2859,172 @@ function App() {
     }
   }
 
+  const resetOccasionForm = () => {
+    setEditingOccasionId('')
+    setOccasionPerson('')
+    setOccasionType('Birthday')
+    setOccasionDate('')
+    setOccasionRelationship('')
+    setOccasionGiftIdeas('')
+    setOccasionPlans('')
+    setOccasionRepeats(true)
+    setOccasionError('')
+    setOccasionFormOpen(false)
+  }
+
+  const editOccasion = (occasion) => {
+    setEditingOccasionId(occasion.id)
+    setOccasionPerson(occasion.person_name)
+    setOccasionType(occasion.occasion_type)
+    setOccasionDate(occasion.occasion_date)
+    setOccasionRelationship(occasion.relationship || '')
+    setOccasionGiftIdeas(occasion.gift_ideas || '')
+    setOccasionPlans(occasion.plans || '')
+    setOccasionRepeats(occasion.repeats_annually)
+    setOccasionError('')
+    setOccasionFormOpen(true)
+  }
+
+  const saveOccasion = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session) {
+      setOccasionError('Sign in to save this occasion.')
+      return
+    }
+
+    const personName = occasionPerson.trim()
+    if (!personName || !occasionDate) {
+      setOccasionError('Enter a person’s name and the occasion date.')
+      return
+    }
+
+    setOccasionError('')
+    setOccasionSaving(true)
+    try {
+      const values = {
+        person_name: personName,
+        occasion_type: occasionType,
+        occasion_date: occasionDate,
+        relationship: occasionRelationship.trim(),
+        gift_ideas: occasionGiftIdeas.trim(),
+        plans: occasionPlans.trim(),
+        repeats_annually: occasionRepeats,
+        updated_at: new Date().toISOString(),
+      }
+      const result = editingOccasionId
+        ? await supabase.from('gift_occasions').update(values).eq('id', editingOccasionId).eq('user_id', session.user.id).select('*').single()
+        : await supabase.from('gift_occasions').insert({ ...values, user_id: session.user.id }).select('*').single()
+      if (result.error) throw result.error
+      setOccasions((current) => editingOccasionId
+        ? current.map((item) => item.id === result.data.id ? result.data : item)
+        : [...current, result.data].sort((first, second) => first.occasion_date.localeCompare(second.occasion_date)))
+      setNotice(`${result.data.person_name}’s occasion ${editingOccasionId ? 'updated' : 'saved'}.`)
+      window.setTimeout(() => setNotice(''), 2600)
+      resetOccasionForm()
+    } catch (error) {
+      setOccasionError(`Could not save this occasion: ${error.message}`)
+    } finally {
+      setOccasionSaving(false)
+    }
+  }
+
+  const deleteOccasion = async (occasion) => {
+    if (!window.confirm(`Delete ${occasion.person_name}’s ${occasion.occasion_type.toLowerCase()}? This cannot be undone.`)) return
+    if (!supabase || !session) return
+    setOccasionError('')
+    setOccasionSaving(true)
+    try {
+      const { error } = await supabase.from('gift_occasions').delete().eq('id', occasion.id).eq('user_id', session.user.id)
+      if (error) throw error
+      setOccasions((current) => current.filter((item) => item.id !== occasion.id))
+      if (editingOccasionId === occasion.id) resetOccasionForm()
+    } catch (error) {
+      setOccasionError(`Could not delete this occasion: ${error.message}`)
+    } finally {
+      setOccasionSaving(false)
+    }
+  }
+
+  const resetRecipeForm = () => {
+    setEditingRecipeId('')
+    setRecipeTitle('')
+    setRecipeCategory('')
+    setRecipeIngredients('')
+    setRecipeInstructions('')
+    setRecipeNotes('')
+    setRecipesError('')
+    setRecipeFormOpen(false)
+  }
+
+  const editRecipe = (recipe) => {
+    setEditingRecipeId(recipe.id)
+    setRecipeTitle(recipe.title)
+    setRecipeCategory(recipe.category || '')
+    setRecipeIngredients(recipe.ingredients || '')
+    setRecipeInstructions(recipe.instructions || '')
+    setRecipeNotes(recipe.notes || '')
+    setRecipesError('')
+    setRecipeFormOpen(true)
+  }
+
+  const saveRecipe = async (event) => {
+    event.preventDefault()
+    if (!supabase || !session) {
+      setRecipesError('Sign in to save this recipe idea.')
+      return
+    }
+
+    const title = recipeTitle.trim()
+    if (!title) {
+      setRecipesError('Enter a recipe name.')
+      return
+    }
+
+    setRecipesError('')
+    setRecipeSaving(true)
+    try {
+      const values = {
+        title,
+        category: recipeCategory.trim(),
+        ingredients: recipeIngredients.trim(),
+        instructions: recipeInstructions.trim(),
+        notes: recipeNotes.trim(),
+        updated_at: new Date().toISOString(),
+      }
+      const result = editingRecipeId
+        ? await supabase.from('recipe_ideas').update(values).eq('id', editingRecipeId).eq('user_id', session.user.id).select('*').single()
+        : await supabase.from('recipe_ideas').insert({ ...values, user_id: session.user.id }).select('*').single()
+      if (result.error) throw result.error
+      setRecipes((current) => editingRecipeId
+        ? [result.data, ...current.filter((item) => item.id !== result.data.id)]
+        : [result.data, ...current])
+      setNotice(`Recipe idea "${result.data.title}" ${editingRecipeId ? 'updated' : 'saved'}.`)
+      window.setTimeout(() => setNotice(''), 2600)
+      resetRecipeForm()
+    } catch (error) {
+      setRecipesError(`Could not save this recipe idea: ${error.message}`)
+    } finally {
+      setRecipeSaving(false)
+    }
+  }
+
+  const deleteRecipe = async (recipe) => {
+    if (!window.confirm(`Delete "${recipe.title}"? This cannot be undone.`)) return
+    if (!supabase || !session) return
+    setRecipesError('')
+    setRecipeSaving(true)
+    try {
+      const { error } = await supabase.from('recipe_ideas').delete().eq('id', recipe.id).eq('user_id', session.user.id)
+      if (error) throw error
+      setRecipes((current) => current.filter((item) => item.id !== recipe.id))
+      if (editingRecipeId === recipe.id) resetRecipeForm()
+    } catch (error) {
+      setRecipesError(`Could not delete this recipe idea: ${error.message}`)
+    } finally {
+      setRecipeSaving(false)
+    }
+  }
+
   const toggleDay = (index) => {
     setCompletedDays((current) => current.includes(index)
       ? current.filter((day) => day !== index)
@@ -2185,13 +3032,74 @@ function App() {
   }
 
   const changePage = (page) => {
-    setActivePage(page)
+    if (page === 'Gifts & occasions' || page === 'Recipe ideas') {
+      setActivePage('Personal & life')
+      setPersonalView(page === 'Gifts & occasions' ? 'occasions' : 'recipes')
+    } else {
+      setActivePage(page)
+    }
     setMenuOpen(false)
   }
 
+  const occasionCards = occasions.map((occasion) => {
+    const today = new Date(`${notificationDate}T00:00:00`)
+    const originalDate = new Date(`${occasion.occasion_date}T00:00:00`)
+    let nextDate = originalDate
+    if (occasion.repeats_annually) {
+      nextDate = new Date(today.getFullYear(), originalDate.getMonth(), originalDate.getDate())
+      if (nextDate < today) nextDate.setFullYear(nextDate.getFullYear() + 1)
+    }
+    const daysUntil = Math.round((nextDate - today) / (24 * 60 * 60 * 1000))
+    return { ...occasion, nextDate: dateInputValue(nextDate), daysUntil }
+  }).sort((first, second) => first.daysUntil - second.daysUntil)
+
+  const wishlistPlaces = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_wishlisted_place && !trip.is_important_document)
+  const regularTrips = trips.filter((trip) => trip.user_id === session?.user?.id && !trip.is_wishlisted_place && !trip.is_packing_checklist && !trip.is_important_document)
+  const importantDocuments = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_important_document)
+  const documentsAreUnlocked = documentsUnlocked && documentsUnlockedUserId === session?.user?.id
   const normalizedQuery = query.trim().toLowerCase()
   const searchResults = normalizedQuery ? [
-    ...trips
+    ...occasionCards
+      .filter((occasion) => `${occasion.person_name} ${occasion.occasion_type} ${occasion.relationship} ${occasion.gift_ideas} ${occasion.plans}`.toLowerCase().includes(normalizedQuery))
+      .map((occasion) => ({
+        key: `occasion-${occasion.id}`,
+        title: `${occasion.person_name} · ${occasion.occasion_type}`,
+        detail: occasion.nextDate,
+        type: 'Occasion',
+        onSelect: () => changePage('Gifts & occasions'),
+      })),
+    ...recipes
+      .filter((recipe) => `${recipe.title} ${recipe.category} ${recipe.ingredients} ${recipe.instructions} ${recipe.notes}`.toLowerCase().includes(normalizedQuery))
+      .map((recipe) => ({
+        key: `recipe-${recipe.id}`,
+        title: recipe.title,
+        detail: recipe.category || 'Recipe idea',
+        type: 'Recipe',
+        onSelect: () => changePage('Recipe ideas'),
+      })),
+    ...wishlistPlaces
+      .filter((place) => `${place.title} ${place.notes || ''}`.toLowerCase().includes(normalizedQuery))
+      .map((place) => ({
+        key: `wishlist-${place.id}`,
+        title: place.title,
+        detail: place.is_completed ? 'Completed wishlist place' : 'Wishlist place',
+        type: 'Place',
+        onSelect: () => {
+          changePage('Personal & life')
+          setPersonalView('trips')
+          setWishlistOpen(true)
+        },
+      })),
+    ...['Gifts & occasions', 'Recipe ideas']
+      .filter((section) => section.toLowerCase().includes(normalizedQuery))
+      .map((section) => ({
+        key: `personal-section-${section}`,
+        title: section,
+        detail: 'Personal & life',
+        type: 'Section',
+        onSelect: () => changePage(section),
+      })),
+    ...regularTrips
       .filter((trip) => `${trip.title} ${trip.trip_date || ''} ${trip.notes || ''}`.toLowerCase().includes(normalizedQuery)
         || ['trip', 'trips', 'memory', 'memories'].includes(normalizedQuery))
       .map((trip) => ({
@@ -2284,7 +3192,7 @@ function App() {
   const weekday = appDate.toLocaleDateString('en-US', { weekday: 'long' })
   const monthDay = appDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
   const greeting = appDate.getHours() < 12 ? 'Good morning' : appDate.getHours() < 18 ? 'Good afternoon' : 'Good evening'
-  const dueTomorrowNotifications = getDueTomorrowNotifications(activeEmis, cards, notificationDate)
+  const dueTomorrowNotifications = getDueTomorrowNotifications(activeEmis, cards, notificationDate, occasions)
   const careerGoalItems = goals.filter((goal) => goal.category === 'Career & skills')
   const selectedCareerTopic = careerTopics.find((topic) => topic.id === selectedCareerTopicId) || null
   const careerTopicChildren = (parentId) => careerTopics
@@ -2428,8 +3336,16 @@ function App() {
                 <div className="notification-heading"><strong>Notifications</strong><span>{dueTomorrowNotifications.length}</span></div>
                 {dueTomorrowNotifications.length
                   ? <ul>{dueTomorrowNotifications.map((item) => <li key={item.id}>
-                    <button type="button" onClick={() => { changePage('Money'); setSelectedYear(appDate.getFullYear()); setSelectedMonth(appDate.getMonth()); setNotificationsOpen(false) }}>
-                      <span className="notification-item-icon"><Icon name={item.type === 'EMI' ? 'clock' : 'card'} size={15} /></span>
+                    <button type="button" onClick={() => {
+                      if (item.type === 'Occasion') changePage('Gifts & occasions')
+                      else {
+                        changePage('Money')
+                        setSelectedYear(appDate.getFullYear())
+                        setSelectedMonth(appDate.getMonth())
+                      }
+                      setNotificationsOpen(false)
+                    }}>
+                      <span className="notification-item-icon"><Icon name={item.type === 'EMI' ? 'clock' : item.type === 'Occasion' ? 'heart' : 'card'} size={15} /></span>
                       <span><strong>{item.title}</strong><small>{item.detail}</small></span>
                     </button>
                   </li>)}</ul>
@@ -2438,13 +3354,18 @@ function App() {
             </div>
             <div className="profile-menu-container" ref={profileContainerRef}>
               <button className="top-avatar" aria-label="Account profile" aria-expanded={profileOpen} onClick={toggleProfile}>
-                {(profileUser?.user_metadata?.full_name || profileUser?.email || session.user.email || 'S').charAt(0).toUpperCase()}
+                <img src={profileAvatar} alt="" />
               </button>
               {profileOpen && <section className="profile-popover" aria-label="Account details">
                 <div className="profile-popover-heading">
-                  <span className="profile-popover-avatar">{(profileUser?.user_metadata?.full_name || profileUser?.email || session.user.email || 'S').charAt(0).toUpperCase()}</span>
+                  <img className="profile-popover-avatar" src={profileAvatar} alt="" />
                   <div><strong>{profileUser?.user_metadata?.full_name || profileUser?.user_metadata?.name || 'Your account'}</strong><span>{profileUser?.email || session.user.email}</span></div>
                 </div>
+                <div className="profile-photo-actions">
+                  <button type="button" className="small-action" onClick={() => setProfileAvatarPreviewOpen(true)}>View photo</button>
+                  <button type="button" className="small-action" onClick={() => profileAvatarInputRef.current?.click()}>Change photo</button>
+                </div>
+                {profileAvatarError && <p className="profile-popover-error" role="alert">{profileAvatarError}</p>}
                 {profileLoading ? <p className="profile-popover-status" role="status">Loading your Supabase account details…</p>
                   : profileError ? <p className="profile-popover-error" role="alert">{profileError}<button type="button" onClick={loadProfile}>Try again</button></p>
                     : profileUser && <dl className="profile-details">
@@ -2454,6 +3375,7 @@ function App() {
                     </dl>}
                 <button type="button" className="profile-popover-signout" onClick={signOut}>Sign out</button>
               </section>}
+              <input ref={profileAvatarInputRef} className="profile-photo-input" type="file" accept="image/*" onChange={changeProfileAvatar} />
             </div>
           </div>
         </header>
@@ -2465,9 +3387,28 @@ function App() {
               <h1>{activePage === 'Overview' ? `${greeting}, Sankalp` : activePage}<span className="wave">{activePage === 'Overview' ? ' ✳' : ''}</span></h1>
               <p className="welcome-subtitle">{activePage === 'Overview' ? 'You’re building a life that feels like yours. Keep going.' : pageSubtitle(activePage)}</p>
             </div>
-            {activePage !== 'Money' && !(activePage === 'Personal & life' && personalView === 'trips') && <button className="primary-button" onClick={openAddIdea}><Icon name="plus" size={17} /> New idea</button>}
+            {!['Money', 'Gifts & occasions', 'Recipe ideas'].includes(activePage) && !(activePage === 'Personal & life' && personalView !== 'goals') && <button className="primary-button" onClick={openAddIdea}><Icon name="plus" size={17} /> New idea</button>}
+            {activePage === 'Money' && !cloudDataLoading && !cloudLoadError && <button className="primary-button money-dashboard-button" aria-pressed={moneyDashboardOpen} onClick={() => {
+              if (!moneyDashboardOpen && selectedMonth === null) {
+                setSelectedMonth(activeMonthIndex)
+                setBudgetDraft(monthlyBudgets[`${selectedYear}-${String(activeMonthIndex + 1).padStart(2, '0')}`]
+                  ? String(monthlyBudgets[`${selectedYear}-${String(activeMonthIndex + 1).padStart(2, '0')}`])
+                  : '')
+                setBudgetError('')
+              }
+              setMoneyDashboardOpen((open) => !open)
+            }}><Icon name="grid" size={16} /> {moneyDashboardOpen ? 'Monthly details' : 'Dashboard'}</button>}
             {activePage === 'Money' && selectedMonth !== null && !cloudDataLoading && !cloudLoadError && <button className="primary-button" onClick={() => openMoneyForm()}><Icon name="plus" size={17} /> Add entry</button>}
           </section>
+
+          {activePage === 'Personal & life' && <nav className="personal-collection-shortcuts" aria-label="Personal and life collections">
+            <button type="button" className={`personal-collection-badge${personalView === 'occasions' ? ' personal-collection-badge-active' : ''}`} aria-pressed={personalView === 'occasions'} onClick={() => setPersonalView('occasions')}>
+              <span className="personal-collection-badge-icon"><Icon name="heart" size={17} /></span><span><strong>Gifts & occasions</strong><small>Remember important people and dates</small></span><span className="personal-collection-badge-count">{occasions.length}</span>
+            </button>
+            <button type="button" className={`personal-collection-badge${personalView === 'recipes' ? ' personal-collection-badge-active' : ''}`} aria-pressed={personalView === 'recipes'} onClick={() => setPersonalView('recipes')}>
+              <span className="personal-collection-badge-icon"><Icon name="journal" size={17} /></span><span><strong>Recipe ideas</strong><small>Save recipes to make or try again</small></span><span className="personal-collection-badge-count">{recipes.length}</span>
+            </button>
+          </nav>}
 
           {activePage === 'Overview' && <>
           <section className="hero-card">
@@ -2531,10 +3472,15 @@ function App() {
             <section className="panel year-ledger">
               <div className="year-ledger-heading">
                 <div><span className="section-kicker">MONTH-BY-MONTH OVERVIEW</span><h2>Choose a month</h2><p>Select a month box to see income, spending, EMI and card details below.</p></div>
-                <div className="year-currency-controls"><span className="currency-badge">CURRENCY · INR ₹</span><label className="year-select-label" htmlFor="money-year">YEAR<select id="money-year" value={selectedYear} onChange={(event) => { setSelectedYear(Number(event.target.value)); setSelectedMonth(null) }}>{availableYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label></div>
+                <div className="year-currency-controls"><span className="currency-badge">CURRENCY · INR ₹</span><label className="year-select-label" htmlFor="money-year">YEAR<select id="money-year" value={selectedYear} onChange={(event) => { setSelectedYear(Number(event.target.value)); setSelectedMonth(null); setBudgetDraft(''); setBudgetError('') }}>{availableYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label></div>
               </div>
               <div className="month-box-grid" aria-label={`${selectedYear} monthly finance overview`}>
-                {monthlyTotals.map((month) => <button key={month.name} className={`month-box ${selectedMonth === month.index ? 'month-box-selected' : ''}`} aria-pressed={selectedMonth === month.index} onClick={() => setSelectedMonth(month.index)}>
+                {monthlyTotals.map((month) => <button key={month.name} className={`month-box ${selectedMonth === month.index ? 'month-box-selected' : ''}`} aria-pressed={selectedMonth === month.index} onClick={() => {
+                  setSelectedMonth(month.index)
+                  const key = `${selectedYear}-${String(month.index + 1).padStart(2, '0')}`
+                  setBudgetDraft(monthlyBudgets[key] ? String(monthlyBudgets[key]) : '')
+                  setBudgetError('')
+                }}>
                   <span className="month-box-name">{month.name}</span>
                   <span className="month-box-total"><small>Income</small><strong>{formatMoney(month.income)}</strong></span>
                   <span className="month-box-total"><small>Spending</small><strong>{formatMoney(month.spending)}</strong></span>
@@ -2544,7 +3490,66 @@ function App() {
               {selectedMonth === null && <p className="month-selection-hint"><Icon name="arrow" size={14} /> Select any month box to open its entries, EMI payments and card details.</p>}
             </section>
 
-            {selectedMonth !== null && <>
+            {selectedMonth !== null && (moneyDashboardOpen ? <section className="money-dashboard">
+              <div className="money-month-heading"><span className="section-kicker">MONTHLY FINANCIAL INSIGHTS · INR ₹</span><h2>{monthNames[selectedMonth]} {selectedYear}</h2></div>
+              <section className="panel dashboard-budget-card">
+                <div className="section-heading"><div><span className="section-kicker">MONTHLY SPENDING PLAN</span><h2>Budget</h2></div><strong className={`dashboard-budget-remaining${budgetRemaining < 0 ? ' dashboard-over-budget' : ''}`}>{monthlyBudget > 0 ? `${formatMoney(Math.abs(budgetRemaining))} ${budgetRemaining < 0 ? 'over budget' : 'remaining'}` : 'No budget set'}</strong></div>
+                <form className="dashboard-budget-form" onSubmit={saveMonthlyBudget}>
+                  <label htmlFor="monthly-budget">Set budget for {monthNames[selectedMonth]} (₹)</label>
+                  <input id="monthly-budget" type="number" min="1" step="1" value={budgetDraft} onChange={(event) => { setBudgetDraft(event.target.value); setBudgetError('') }} placeholder="Enter monthly budget" />
+                  <button className="primary-button" type="submit">{monthlyBudget > 0 ? 'Update budget' : 'Save budget'}</button>
+                </form>
+                {budgetError && <p className="dashboard-budget-error" role="alert">{budgetError}</p>}
+                {monthlyBudget > 0 && <div className="dashboard-budget-progress" aria-label={`${Math.round(totalOutgoings / monthlyBudget * 100)} percent of budget used`}>
+                  <div className="dashboard-budget-track"><span className={budgetRemaining < 0 ? 'dashboard-budget-track-over' : ''} style={{ width: `${budgetProgress}%` }} /></div>
+                  <div><span>{formatMoney(totalOutgoings)} spent</span><span>{formatMoney(monthlyBudget)} budget</span></div>
+                </div>}
+                <p className="dashboard-local-note">Budget is saved in this browser. Finance totals are from your Supabase records.</p>
+              </section>
+
+              <div className="dashboard-stat-grid">
+                <article className="dashboard-stat"><span>INCOME</span><strong>{formatMoney(totalIncome)}</strong><small>{monthTransactions.filter((entry) => entry.type === 'Income').length} entries</small></article>
+                <article className="dashboard-stat"><span>SPENDING</span><strong>{formatMoney(totalOutgoings)}</strong><small>{monthTransactions.filter((entry) => entry.type !== 'Income').length} entries</small></article>
+                <article className={`dashboard-stat${remainingMonthlyBalance < 0 ? ' dashboard-stat-negative' : ''}`}><span>NET CASH FLOW</span><strong>{formatMoney(remainingMonthlyBalance)}</strong><small>{remainingMonthlyBalance >= 0 ? 'Income minus spending' : 'Spending exceeds income'}</small></article>
+                <article className="dashboard-stat"><span>MONTHLY COMMITMENTS</span><strong>{formatMoney(monthlyCommitments)}</strong><small>EMIs, subscriptions, SIPs & chit funds</small></article>
+              </div>
+
+              <div className="dashboard-chart-grid">
+                <section className="panel dashboard-chart-card">
+                  <div className="section-heading"><div><span className="section-kicker">WHERE YOUR MONEY GOES</span><h2>Spending by category</h2></div></div>
+                  {spendingByCategory.length > 0 ? <div className="dashboard-category-list">{spendingByCategory.map((category) => <div className="dashboard-category-row" key={category.name}>
+                    <div><span>{category.name}</span><strong>{formatMoney(category.total)}</strong></div>
+                    <div className="dashboard-category-track"><span style={{ width: `${totalOutgoings > 0 ? category.total / totalOutgoings * 100 : 0}%` }} /></div>
+                  </div>)}</div> : <p className="dashboard-empty">No spending entries for this month yet.</p>}
+                  <p className="dashboard-chart-note">Categories use the payment source recorded on each spending entry.</p>
+                </section>
+                <section className="panel dashboard-chart-card">
+                  <div className="section-heading"><div><span className="section-kicker">MONTHLY CASH FLOW</span><h2>Income vs. spending</h2></div></div>
+                  <div className="dashboard-cashflow-chart" role="img" aria-label={`Income ${formatMoney(totalIncome)} and spending ${formatMoney(totalOutgoings)}`}>
+                    <div className="dashboard-cashflow-row"><div><span>Income</span><strong>{formatMoney(totalIncome)}</strong></div><div className="dashboard-cashflow-track"><span className="dashboard-income-bar" style={{ width: `${totalIncome / maxCashFlow * 100}%` }} /></div></div>
+                    <div className="dashboard-cashflow-row"><div><span>Spending</span><strong>{formatMoney(totalOutgoings)}</strong></div><div className="dashboard-cashflow-track"><span className="dashboard-spending-bar" style={{ width: `${totalOutgoings / maxCashFlow * 100}%` }} /></div></div>
+                  </div>
+                  <div className="dashboard-cashflow-net"><span>Net for {monthNames[selectedMonth]}</span><strong className={remainingMonthlyBalance < 0 ? 'dashboard-over-budget' : ''}>{formatMoney(remainingMonthlyBalance)}</strong></div>
+                </section>
+              </div>
+
+              <section className="panel dashboard-payments-card">
+                <div className="section-heading"><div><span className="section-kicker">EMIS, CARDS & RECURRING PAYMENTS</span><h2>Payment reminders <span className="heading-count">{scheduledPayments.length}</span></h2></div></div>
+                {scheduledPayments.length > 0 ? <div className="dashboard-payment-list">{scheduledPayments.map((payment) => {
+                  const dateLabel = new Date(`${payment.dueDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                  const status = payment.paid ? 'Paid'
+                    : payment.untracked ? 'Scheduled'
+                      : selectedMonthIsCurrent && payment.dueDate < notificationDate ? 'Past due'
+                        : selectedMonthKey < notificationDate.slice(0, 7) ? 'Not logged' : 'Upcoming'
+                  return <article className="dashboard-payment-row" key={payment.id}>
+                    <span className={`dashboard-payment-date${status === 'Past due' ? ' dashboard-payment-date-late' : ''}`}>{dateLabel}</span>
+                    <div><strong>{payment.name}</strong><span>{payment.type}{payment.untracked ? ' · payment status not tracked' : ''}</span></div>
+                    <strong className="dashboard-payment-amount">{formatMoney(payment.amount)}</strong>
+                    <span className={`dashboard-payment-status dashboard-status-${status.toLowerCase().replace(' ', '-')}`}>{status}</span>
+                  </article>
+                })}</div> : <p className="dashboard-empty">No scheduled payments are recorded for this month.</p>}
+              </section>
+            </section> : <>
             <div className="money-month-heading"><span className="section-kicker">SELECTED MONTH · INR ₹</span><h2>{monthNames[selectedMonth]} {selectedYear}</h2></div>
             <div className="money-summary-grid">
               <article className="money-summary money-summary-income"><span><Icon name="income" size={18} /></span><div><small>{monthNames[selectedMonth].toUpperCase()} {selectedYear} · INCOME</small><strong>{formatMoney(totalIncome)}</strong><em>{monthTransactions.filter((entry) => entry.type === 'Income').length} income entries</em></div></article>
@@ -2764,7 +3769,7 @@ function App() {
                   </section>
               </div>
             </div>
-            </>}
+            </>)}
           </section>}
 
           {activePage === 'Personal & life' && personalView === 'goals' && <button type="button" className="panel trips-entry-panel" onClick={openTrips}>
@@ -2896,18 +3901,124 @@ function App() {
                 {!tripMediaLoading && !tripMediaError && tripCarouselItems.length === 0 && <p className="trip-empty-media">Add photos or videos to see your trip memories here.</p>}
                 <button type="submit" className="primary-button trip-save-button" disabled={tripSaving}><Icon name="check" size={16} /> {tripSaving ? 'Saving trip…' : 'Save changes'}</button>
               </form>
+            </> : wishlistOpen ? <>
+              <div className="section-heading trips-heading">
+                <div>
+                  <button className="trips-back-button" onClick={() => { setWishlistOpen(false); setWishlistError(''); resetWishlistForm() }}><Icon name="arrow" size={15} /> Back to trips</button>
+                  <span className="section-kicker">PLACES YOU WANT TO VISIT</span>
+                  <h2>Places wishlist <span className="heading-count">{wishlistPlaces.length}</span></h2>
+                </div>
+                {!wishlistFormOpen && <button type="button" className="primary-button" onClick={() => { resetWishlistForm(); setWishlistFormOpen(true) }}><Icon name="plus" size={15} /> Add place</button>}
+              </div>
+              <p className="focus-intro">Save places you’d like to visit. Check them off when you’ve been, and completed places will be highlighted.</p>
+              {wishlistError && <p className="trip-error" role="alert">{wishlistError}</p>}
+              {wishlistFormOpen && <form className="wishlist-place-form" onSubmit={saveWishlistPlace}>
+                <label htmlFor="wishlist-place-name">Place name</label>
+                <input id="wishlist-place-name" type="text" maxLength={100} value={wishlistPlaceName} onChange={(event) => setWishlistPlaceName(event.target.value)} placeholder="e.g. Hampi, Karnataka" required disabled={wishlistSaving} />
+                <label htmlFor="wishlist-place-notes">Notes <span>OPTIONAL</span></label>
+                <textarea id="wishlist-place-notes" value={wishlistPlaceNotes} onChange={(event) => setWishlistPlaceNotes(event.target.value)} rows={3} maxLength={1000} placeholder="Why you want to go, things to see, or who recommended it…" disabled={wishlistSaving} />
+                <div className="collection-form-actions">
+                  <button type="submit" className="primary-button" disabled={wishlistSaving}><Icon name={wishlistSaving ? 'clock' : 'check'} size={14} /> {wishlistSaving ? 'Saving…' : wishlistEditingId ? 'Save changes' : 'Save place'}</button>
+                  <button type="button" className="small-action" onClick={resetWishlistForm} disabled={wishlistSaving}>Cancel</button>
+                </div>
+              </form>}
+              {tripsLoading ? <div className="business-note-status" role="status">Loading your wishlist…</div> : wishlistPlaces.length > 0
+                ? <div className="wishlist-place-list">{wishlistPlaces.map((place) => <article className={`wishlist-place-card${place.is_completed ? ' wishlist-place-completed' : ''}`} key={place.id}>
+                  <label className="wishlist-place-checkbox" htmlFor={`wishlist-completed-${place.id}`} aria-label={`Mark ${place.title} ${place.is_completed ? 'not completed' : 'completed'}`}>
+                    <input id={`wishlist-completed-${place.id}`} type="checkbox" checked={Boolean(place.is_completed)} onChange={() => toggleWishlistPlaceCompleted(place)} disabled={wishlistSaving} />
+                    <span className="wishlist-checkmark"><Icon name="check" size={13} /></span>
+                  </label>
+                  <div className="wishlist-place-copy">
+                    <div className="wishlist-place-title"><h3>{place.title}</h3><span className="wishlist-place-status">{place.is_completed ? 'Visited' : 'Want to visit'}</span></div>
+                    {place.notes && <p>{place.notes}</p>}
+                  </div>
+                  <div className="collection-card-actions">
+                    <button type="button" className="transaction-edit" aria-label={`Edit wishlist place ${place.title}`} onClick={() => editWishlistPlace(place)} disabled={wishlistSaving}><Icon name="edit" size={15} /></button>
+                    <button type="button" className="transaction-delete" aria-label={`Remove wishlist place ${place.title}`} onClick={() => deleteTrip(place)} disabled={deletingTripIds.includes(place.id) || wishlistSaving}><Icon name="trash" size={15} /></button>
+                  </div>
+                </article>)}</div>
+                : <div className="trip-empty-state"><span className="trip-list-icon"><Icon name="heart" size={20} /></span><strong>Your wishlist is ready</strong><p>Add places you’d like to visit, then check them off when you’ve been.</p><button type="button" className="primary-button" onClick={() => { resetWishlistForm(); setWishlistFormOpen(true) }}><Icon name="plus" size={14} /> Add your first place</button></div>}
             </> : <>
               <div className="section-heading trips-heading">
                 <div>
                   <button className="trips-back-button" onClick={() => setPersonalView('goals')}><Icon name="arrow" size={15} /> Back to Personal & life</button>
                   <span className="section-kicker">MEMORIES TO KEEP</span>
-                  <h2>Trips <span className="heading-count">{trips.length}</span></h2>
+                  <h2>Trips <span className="heading-count">{regularTrips.length}</span></h2>
                 </div>
-                <button className="primary-button" onClick={() => { setNewTripTitle(''); setNewTripDate(''); setTripsError(''); setAddTripOpen(true) }}><Icon name="plus" size={16} /> Add trip</button>
+                <div className="trips-header-actions">
+                  <button type="button" className="small-action wishlist-open-button" onClick={() => { setWishlistOpen(true); setWishlistError('') }}><Icon name="heart" size={14} /> Wishlist places <span>{wishlistPlaces.length}</span></button>
+                  <button type="button" className="small-action trip-utility-button" onClick={openPackingChecklist}><Icon name="check" size={14} /> Packing checklist</button>
+                  <button type="button" className="small-action trip-utility-button" onClick={() => { setDocumentsOpen(true); setDocumentsUnlocked(false); setDocumentsUnlockedUserId(''); setDocumentPassword(''); setDocumentAuthError(''); setDocumentView('all'); setDocumentFormOpen(false); setDocumentFile(null); setDocumentName(''); setSignedDocument(null); setDocumentPreviewLoading(false) }}><Icon name="lock" size={14} /> Important documents</button>
+                  {!documentsOpen && <button className="primary-button" onClick={() => { setNewTripTitle(''); setNewTripDate(''); setTripsError(''); setAddTripOpen(true) }}><Icon name="plus" size={16} /> Add trip</button>}
+                </div>
               </div>
               {tripsError && <p className="trip-error" role="alert">{tripsError}<button type="button" className="business-note-retry" onClick={() => { setTripsError(''); setTripsLoading(true); setTripsReload((count) => count + 1) }}>Try again</button></p>}
-              {tripsLoading ? <div className="business-note-status" role="status">Loading your trips…</div> : trips.length > 0
-                ? <div className="trip-list">{trips.map((trip) => <div className="trip-list-item" key={trip.id}>
+              {documentsOpen && documentsAreUnlocked ? <section className="important-documents-panel">
+                <div className="important-documents-heading">
+                  <div><span className="section-kicker">PRIVATE TO YOUR ACCOUNT</span><h3>Important documents <span className="heading-count">{importantDocuments.length}</span></h3></div>
+                  <button type="button" className="small-action" onClick={closeImportantDocuments}><Icon name="lock" size={14} /> Lock</button>
+                </div>
+                <p className="focus-intro">Files are stored privately in your account. The password prompt verifies your current sign-in password; it does not encrypt files separately.</p>
+                <div className="important-document-toolbar">
+                  <div className="collection-view-toggle" role="group" aria-label="Document display">
+                    <button type="button" className={documentView === 'all' ? 'collection-view-active' : ''} onClick={() => setDocumentView('all')}>Show all documents</button>
+                    <button type="button" className={documentView === 'carousel' ? 'collection-view-active' : ''} onClick={() => { setDocumentView('carousel'); setDocumentPreviewLoading(true) }} disabled={!importantDocuments.length}>Carousel view</button>
+                  </div>
+                  <button type="button" className="primary-button" onClick={() => {
+                    if (documentFormOpen) {
+                      setDocumentFormOpen(false)
+                      setEditingDocumentId('')
+                      setDocumentFile(null)
+                      setDocumentName('')
+                    } else {
+                      setDocumentFormOpen(true)
+                      setEditingDocumentId('')
+                      setDocumentFile(null)
+                      setDocumentName('')
+                    }
+                    setDocumentError('')
+                  }}><Icon name="plus" size={15} /> Add attachment</button>
+                </div>
+                {documentFormOpen && <form className="important-document-form" onSubmit={saveImportantDocument}>
+                  <label htmlFor="important-document-name">Document name</label>
+                  <input id="important-document-name" type="text" maxLength={200} value={documentName} onChange={(event) => setDocumentName(event.target.value)} placeholder="e.g. Passport, travel insurance" required disabled={documentSaving} />
+                  <label htmlFor="important-document-file">{editingDocumentId ? 'Replace attachment (optional)' : 'Choose an attachment'} <span>PDF, IMAGE, TEXT/CSV, WORD OR EXCEL · UP TO 25 MB</span></label>
+                  <input id="important-document-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.txt,.csv,.doc,.docx,.xls,.xlsx,application/pdf,image/jpeg,image/png,image/webp,image/gif,text/plain,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={selectImportantDocument} disabled={documentSaving} />
+                  {documentFile && <p className="important-document-selected">{documentFile.name} · {(documentFile.size / (1024 * 1024)).toFixed(1)} MB</p>}
+                  {documentError && <p className="business-note-error" role="alert">{documentError}</p>}
+                  <div className="important-document-form-actions"><button type="button" className="small-action" onClick={() => { setDocumentFormOpen(false); setEditingDocumentId(''); setDocumentFile(null); setDocumentName(''); setDocumentError('') }} disabled={documentSaving}>Cancel</button><button type="submit" className="primary-button" disabled={documentSaving || (!documentFile && !editingDocumentId) || !documentName.trim()}><Icon name="check" size={15} /> {documentSaving ? 'Saving…' : editingDocumentId ? 'Save changes' : 'Save attachment'}</button></div>
+                </form>}
+                {!documentFormOpen && documentError && <p className="business-note-error" role="alert">{documentError}</p>}
+                {tripsLoading ? <div className="business-note-status" role="status">Loading your documents…</div> : documentView === 'all' ? importantDocuments.length
+                  ? <div className="important-document-list">{importantDocuments.map((document, index) => {
+                    const file = Array.isArray(document.media) ? document.media[0] : null
+                    return <div className="important-document-row" key={document.id}>
+                      <button type="button" className="important-document-card" onClick={() => { setSelectedDocumentIndex(index); setDocumentView('carousel'); setDocumentPreviewLoading(true) }}>
+                        <span className="important-document-icon"><Icon name="journal" size={19} /></span><span className="important-document-copy"><strong>{document.title || file?.name}</strong><span>{file?.name || file?.type || 'Attachment'}{document.created_at ? ` · ${new Date(document.created_at).toLocaleDateString()}` : ''}</span></span><Icon name="chevron" size={17} />
+                      </button>
+                      <div className="important-document-actions">
+                        <button type="button" className="transaction-edit" aria-label={`Edit ${document.title}`} title="Edit document" onClick={() => editImportantDocument(document)} disabled={documentSaving}><Icon name="edit" size={15} /></button>
+                        <button type="button" className="transaction-delete" aria-label={`Delete ${document.title}`} title="Delete document" onClick={() => deleteImportantDocument(document)} disabled={documentSaving}><Icon name="trash" size={15} /></button>
+                      </div>
+                    </div>
+                  })}</div>
+                  : <div className="trip-empty-state"><span className="trip-list-icon"><Icon name="journal" size={20} /></span><strong>No important documents saved</strong><p>Add a document attachment to keep it accessible here.</p><button type="button" className="primary-button" onClick={() => { setEditingDocumentId(''); setDocumentFile(null); setDocumentName(''); setDocumentFormOpen(true) }}><Icon name="plus" size={14} /> Add your first attachment</button></div>
+                  : importantDocuments.length > 0 && <div className="important-document-carousel">
+                    <div className="important-document-carousel-heading"><button type="button" className="small-action" onClick={() => { setSelectedDocumentIndex((index) => (index - 1 + importantDocuments.length) % importantDocuments.length); setDocumentPreviewLoading(true) }} aria-label="Previous document"><Icon name="arrow" className="document-arrow-previous" size={15} /></button><strong>{selectedDocumentIndex + 1} of {importantDocuments.length}</strong><button type="button" className="small-action" onClick={() => { setSelectedDocumentIndex((index) => (index + 1) % importantDocuments.length); setDocumentPreviewLoading(true) }} aria-label="Next document"><Icon name="arrow" size={15} /></button></div>
+                    <h4>{importantDocuments[selectedDocumentIndex]?.title || importantDocuments[selectedDocumentIndex]?.media?.[0]?.name}</h4>
+                    <div className="important-document-preview">
+                      {!importantDocuments[selectedDocumentIndex]?.media?.[0]?.path ? <p className="business-note-error" role="alert">This saved document has no attachment to preview.</p>
+                        : documentPreviewLoading ? <div className="business-note-status" role="status">Loading document…</div>
+                          : signedDocument?.path === importantDocuments[selectedDocumentIndex]?.media?.[0]?.path && importantDocuments[selectedDocumentIndex]?.media?.[0]?.type?.startsWith('image/')
+                          ? <img src={signedDocument.url} alt={importantDocuments[selectedDocumentIndex]?.title || 'Saved document'} />
+                          : signedDocument?.path === importantDocuments[selectedDocumentIndex]?.media?.[0]?.path && importantDocuments[selectedDocumentIndex]?.media?.[0]?.type === 'application/pdf'
+                            ? <iframe src={signedDocument.url} title={importantDocuments[selectedDocumentIndex]?.title || 'Saved PDF'} />
+                            : signedDocument?.path === importantDocuments[selectedDocumentIndex]?.media?.[0]?.path && <a className="primary-button" href={signedDocument.url} target="_blank" rel="noreferrer">Open or download document <Icon name="arrow" size={14} /></a>}
+                      {!documentPreviewLoading && documentError && <p className="business-note-error" role="alert">{documentError}</p>}
+                    </div>
+                  </div>}
+              </section> : tripsLoading ? <div className="business-note-status" role="status">Loading your trips…</div> : regularTrips.length > 0
+                ? <div className="trip-list">{regularTrips.map((trip) => <div className="trip-list-item" key={trip.id}>
                   <button type="button" className="trip-list-card" onClick={() => openTrip(trip)}>
                     <span className="trip-list-icon"><Icon name="journal" size={18} /></span>
                     <span className="trip-list-copy"><strong>{trip.title}</strong><span>{trip.trip_date || trip.notes || `${Array.isArray(trip.media) ? trip.media.length : 0} photos or videos`}</span></span>
@@ -2981,6 +4092,69 @@ function App() {
               <div className="prompt-scribble" aria-hidden="true">✳</div>
             </section>
           </div>}
+          {activePage === 'Personal & life' && personalView === 'occasions' && <section className="panel personal-collection-panel">
+            <button type="button" className="trips-back-button" onClick={() => setPersonalView('goals')}><Icon name="arrow" size={15} /> Back to Personal & life</button>
+            <div className="section-heading"><div><span className="section-kicker">REMEMBER THE PEOPLE YOU LOVE</span><h2>Gifts & occasions <span className="heading-count">{occasions.length}</span></h2></div>{!occasionFormOpen && <button type="button" className="primary-button" onClick={() => { resetOccasionForm(); setOccasionFormOpen(true) }}><Icon name="plus" size={14} /> Add occasion</button>}</div>
+            <p className="focus-intro">Keep important dates, gift ideas, and plans together. Repeating occasions will automatically show their next date each year.</p>
+            {occasionError && <p className="cloud-inline-error" role="alert">{occasionError}{occasionError.startsWith('Could not load') && <button type="button" className="business-note-retry" onClick={() => { setOccasionError(''); setRecipesError(''); setPersonalCollectionsReload((count) => count + 1) }}>Retry loading</button>}</p>}
+            {occasionFormOpen && <form className="personal-collection-form" onSubmit={saveOccasion}>
+              <div className="collection-form-grid">
+                <div><label htmlFor="occasion-person">Person’s name</label><input id="occasion-person" type="text" maxLength={100} value={occasionPerson} onChange={(event) => setOccasionPerson(event.target.value)} placeholder="e.g. Alex" required disabled={occasionSaving} /></div>
+                <div><label htmlFor="occasion-type">Occasion</label><select id="occasion-type" value={occasionType} onChange={(event) => setOccasionType(event.target.value)} disabled={occasionSaving}>{occasionTypes.map((type) => <option key={type}>{type}</option>)}</select></div>
+                <div><label htmlFor="occasion-date">Date</label><input id="occasion-date" type="date" value={occasionDate} onChange={(event) => setOccasionDate(event.target.value)} required disabled={occasionSaving} /></div>
+                <div><label htmlFor="occasion-relationship">Relationship <span>OPTIONAL</span></label><input id="occasion-relationship" type="text" maxLength={100} value={occasionRelationship} onChange={(event) => setOccasionRelationship(event.target.value)} placeholder="e.g. Friend, sister" disabled={occasionSaving} /></div>
+              </div>
+              <label htmlFor="occasion-gifts">Gift ideas <span>OPTIONAL</span></label>
+              <textarea id="occasion-gifts" value={occasionGiftIdeas} onChange={(event) => setOccasionGiftIdeas(event.target.value)} rows={3} maxLength={5000} placeholder="Ideas they mentioned, things they enjoy…" disabled={occasionSaving} />
+              <label htmlFor="occasion-plans">Plans or notes <span>OPTIONAL</span></label>
+              <textarea id="occasion-plans" value={occasionPlans} onChange={(event) => setOccasionPlans(event.target.value)} rows={3} maxLength={5000} placeholder="Celebration plans, reminders, or details to remember…" disabled={occasionSaving} />
+              <label className="collection-recurring-toggle" htmlFor="occasion-repeats"><input id="occasion-repeats" type="checkbox" checked={occasionRepeats} onChange={(event) => setOccasionRepeats(event.target.checked)} disabled={occasionSaving} /><span>Repeats every year</span></label>
+              <div className="collection-form-actions"><button type="submit" className="primary-button" disabled={occasionSaving}><Icon name={occasionSaving ? 'clock' : 'check'} size={14} /> {occasionSaving ? 'Saving…' : editingOccasionId ? 'Save changes' : 'Save occasion'}</button><button type="button" className="small-action" onClick={resetOccasionForm} disabled={occasionSaving}>Cancel</button></div>
+            </form>}
+            {personalCollectionsLoading ? <p className="collection-empty" role="status">Loading your saved occasions…</p> : occasions.length > 0
+              ? <div className="occasion-list">{occasionCards.map((occasion) => <article className="occasion-card" key={occasion.id}>
+                <div className="occasion-card-date"><strong>{new Date(`${occasion.nextDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</strong><span>{new Date(`${occasion.nextDate}T00:00:00`).toLocaleDateString('en-IN', { year: 'numeric' })}</span></div>
+                <div className="occasion-card-main"><div className="occasion-card-heading"><div><h3>{occasion.person_name}</h3><span>{occasion.occasion_type}{occasion.relationship ? ` · ${occasion.relationship}` : ''}</span></div><span className={`occasion-countdown${occasion.daysUntil < 0 ? ' occasion-past' : ''}`}>{occasion.daysUntil < 0 ? 'Past' : occasion.daysUntil === 0 ? 'Today' : `${occasion.daysUntil} days`}</span></div>
+                  {(occasion.gift_ideas || occasion.plans) && <div className="occasion-card-notes">
+                    {occasion.gift_ideas && <p><strong>Gift ideas</strong>{occasion.gift_ideas}</p>}
+                    {occasion.plans && <p><strong>Plans</strong>{occasion.plans}</p>}
+                  </div>}
+                  <span className="occasion-repeat-label">{occasion.repeats_annually ? 'Repeats yearly' : 'One-time occasion'}</span>
+                </div>
+                <div className="collection-card-actions"><button type="button" className="transaction-edit" aria-label={`Edit ${occasion.person_name}'s occasion`} onClick={() => editOccasion(occasion)} disabled={occasionSaving}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete" aria-label={`Delete ${occasion.person_name}'s occasion`} onClick={() => deleteOccasion(occasion)} disabled={occasionSaving}><Icon name="trash" size={15} /></button></div>
+              </article>)}</div>
+              : !occasionError && <div className="collection-empty"><Icon name="heart" size={22} /><strong>No occasions saved yet</strong><span>Add a birthday or special date to remember it, along with gift ideas and plans.</span></div>}
+          </section>}
+
+          {activePage === 'Personal & life' && personalView === 'recipes' && <section className="panel personal-collection-panel">
+            <button type="button" className="trips-back-button" onClick={() => setPersonalView('goals')}><Icon name="arrow" size={15} /> Back to Personal & life</button>
+            <div className="section-heading"><div><span className="section-kicker">SAVE RECIPES TO MAKE AGAIN</span><h2>Recipe ideas <span className="heading-count">{recipes.length}</span></h2></div>{!recipeFormOpen && <button type="button" className="primary-button" onClick={() => { resetRecipeForm(); setRecipeFormOpen(true) }}><Icon name="plus" size={14} /> Add recipe</button>}</div>
+            <p className="focus-intro">Collect dishes you want to try or recipes you want to remember. Add ingredients, steps, and your own notes—no meal schedule required.</p>
+            {recipesError && <p className="cloud-inline-error" role="alert">{recipesError}{recipesError.startsWith('Could not load') && <button type="button" className="business-note-retry" onClick={() => { setOccasionError(''); setRecipesError(''); setPersonalCollectionsReload((count) => count + 1) }}>Retry loading</button>}</p>}
+            {recipeFormOpen && <form className="personal-collection-form" onSubmit={saveRecipe}>
+              <div className="collection-form-grid">
+                <div><label htmlFor="recipe-title">Recipe name</label><input id="recipe-title" type="text" maxLength={150} value={recipeTitle} onChange={(event) => setRecipeTitle(event.target.value)} placeholder="e.g. Crispy chilli paneer" required disabled={recipeSaving} /></div>
+                <div><label htmlFor="recipe-category">Category <span>OPTIONAL</span></label><input id="recipe-category" type="text" maxLength={100} value={recipeCategory} onChange={(event) => setRecipeCategory(event.target.value)} placeholder="e.g. Snack, dessert, breakfast" disabled={recipeSaving} /></div>
+              </div>
+              <label htmlFor="recipe-ingredients">Ingredients <span>OPTIONAL</span></label>
+              <textarea id="recipe-ingredients" value={recipeIngredients} onChange={(event) => setRecipeIngredients(event.target.value)} rows={5} maxLength={10000} placeholder="List ingredients and quantities…" disabled={recipeSaving} />
+              <label htmlFor="recipe-instructions">Method or steps <span>OPTIONAL</span></label>
+              <textarea id="recipe-instructions" value={recipeInstructions} onChange={(event) => setRecipeInstructions(event.target.value)} rows={6} maxLength={20000} placeholder="Write the steps so you can make it again…" disabled={recipeSaving} />
+              <label htmlFor="recipe-notes">Personal notes or source <span>OPTIONAL</span></label>
+              <textarea id="recipe-notes" value={recipeNotes} onChange={(event) => setRecipeNotes(event.target.value)} rows={3} maxLength={5000} placeholder="Who shared it? Any changes you want to try next time?" disabled={recipeSaving} />
+              <div className="collection-form-actions"><button type="submit" className="primary-button" disabled={recipeSaving}><Icon name={recipeSaving ? 'clock' : 'check'} size={14} /> {recipeSaving ? 'Saving…' : editingRecipeId ? 'Save changes' : 'Save recipe'}</button><button type="button" className="small-action" onClick={resetRecipeForm} disabled={recipeSaving}>Cancel</button></div>
+            </form>}
+            {personalCollectionsLoading ? <p className="collection-empty" role="status">Loading your saved recipe ideas…</p> : recipes.length > 0
+              ? <div className="recipe-list">{recipes.map((recipe) => <article className="recipe-card" key={recipe.id}>
+                <div className="recipe-card-heading"><div><span className="section-kicker">{recipe.category || 'RECIPE IDEA'}</span><h3>{recipe.title}</h3></div><div className="collection-card-actions"><button type="button" className="transaction-edit" aria-label={`Edit recipe ${recipe.title}`} onClick={() => editRecipe(recipe)} disabled={recipeSaving}><Icon name="edit" size={15} /></button><button type="button" className="transaction-delete" aria-label={`Delete recipe ${recipe.title}`} onClick={() => deleteRecipe(recipe)} disabled={recipeSaving}><Icon name="trash" size={15} /></button></div></div>
+                {recipe.ingredients && <div className="recipe-card-section"><strong>Ingredients</strong><p>{recipe.ingredients}</p></div>}
+                {recipe.instructions && <div className="recipe-card-section"><strong>Method</strong><p>{recipe.instructions}</p></div>}
+                {recipe.notes && <div className="recipe-card-section recipe-personal-note"><strong>Your notes</strong><p>{recipe.notes}</p></div>}
+                {!recipe.ingredients && !recipe.instructions && !recipe.notes && <p className="recipe-empty-details">Add ingredients and method whenever you’re ready.</p>}
+              </article>)}</div>
+              : !recipesError && <div className="collection-empty"><Icon name="journal" size={22} /><strong>No recipe ideas saved yet</strong><span>Save a recipe you’d like to try or make again.</span></div>}
+          </section>}
+
           {activePage === 'Journal' && <section className="panel focus-panel"><div className="section-heading"><div><span className="section-kicker">A MOMENT FOR YOU</span><h2>Personal reflections</h2></div></div><p className="focus-intro">Capture what you learned, what’s on your mind, or a moment you want to remember.</p><textarea className="journal-input" placeholder="Start with: Lately, I’ve been thinking about…" rows={7} /></section>}
           {activePage === 'Habits' && <section className="panel focus-panel"><div className="section-heading"><div><span className="section-kicker">SMALL STEPS, REPEATED</span><h2>Your weekly check-in</h2></div><span className="week-label">{completedDays.length} / 7 DAYS</span></div><p className="focus-intro">Check off the days you made time for yourself. This tracker is saved in this browser.</p><div className="week-days habit-days-large">{['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => <button key={`${day}-${index}`} className={`day-column ${completedDays.includes(index) ? 'day-done' : ''}`} onClick={() => toggleDay(index)} aria-label={`${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][index]} ${completedDays.includes(index) ? 'completed' : 'not completed'}`}><span>{['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][index]}</span><i>{completedDays.includes(index) && <Icon name="check" size={13} />}</i></button>)}</div></section>}
           <footer className="page-footer"><span>Made for the life you’re growing into.</span><span><Icon name="spark" size={13} /> One day at a time</span></footer>
@@ -3024,6 +4198,39 @@ function App() {
             <button type="submit" className="primary-button modal-submit" disabled={businessNoteSaving}><Icon name="check" size={16} /> {businessNoteSaving ? 'Saving notes…' : 'Save notes'}</button>
           </>}
         </form>
+      </div>}
+      {packingChecklistOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !packingChecklistSaving) setPackingChecklistOpen(false) }}>
+        <form className="idea-modal packing-checklist-modal" onSubmit={savePackingChecklist}>
+          <button type="button" className="modal-close" onClick={() => setPackingChecklistOpen(false)} aria-label="Close packing checklist" disabled={packingChecklistSaving}><Icon name="close" size={18} /></button>
+          <div className="modal-mark"><Icon name="check" size={21} /></div>
+          <span className="section-kicker">TRIP PREPARATION</span>
+          <h2>Packing checklist</h2>
+          <p>Keep your packing notes in one place. Use a new line for each item.</p>
+          {packingChecklistError && <p className="business-note-error" role="alert">{packingChecklistError}</p>}
+          <label htmlFor="packing-checklist-notes">Checklist notes</label>
+          <textarea id="packing-checklist-notes" className="packing-checklist-notes" value={packingChecklistNotes} onChange={(event) => setPackingChecklistNotes(event.target.value)} placeholder={'Passport\nCharger\nComfortable shoes'} rows={10} maxLength={1000} disabled={packingChecklistSaving} />
+          <button type="submit" className="primary-button modal-submit" disabled={packingChecklistSaving}><Icon name="check" size={16} /> {packingChecklistSaving ? 'Saving…' : 'Save checklist'}</button>
+        </form>
+      </div>}
+      {documentsOpen && !documentsAreUnlocked && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !documentAuthLoading) closeImportantDocuments() }}>
+        <form className="idea-modal document-password-modal" onSubmit={verifyDocumentPassword}>
+          <button type="button" className="modal-close" onClick={closeImportantDocuments} aria-label="Close password prompt" disabled={documentAuthLoading}><Icon name="close" size={18} /></button>
+          <div className="modal-mark"><Icon name="lock" size={21} /></div>
+          <span className="section-kicker">PRIVATE TRIP DOCUMENTS</span>
+          <h2>Verify your password</h2>
+          <p>Enter your current account password to open your important documents.</p>
+          <label htmlFor="document-account-password">Password</label>
+          <input id="document-account-password" type="password" autoComplete="current-password" value={documentPassword} onChange={(event) => { setDocumentPassword(event.target.value); setDocumentAuthError('') }} required disabled={documentAuthLoading} />
+          {documentAuthError && <p className="business-note-error" role="alert">{documentAuthError}</p>}
+          <button type="submit" className="primary-button modal-submit" disabled={documentAuthLoading || !documentPassword}><Icon name="lock" size={15} /> {documentAuthLoading ? 'Verifying…' : 'Unlock documents'}</button>
+        </form>
+      </div>}
+      {profileAvatarPreviewOpen && <div className="modal-backdrop profile-photo-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileAvatarPreviewOpen(false) }}>
+        <section className="profile-photo-preview" role="dialog" aria-modal="true" aria-label="Profile photo">
+          <button type="button" className="modal-close" onClick={() => setProfileAvatarPreviewOpen(false)} aria-label="Close photo preview"><Icon name="close" size={18} /></button>
+          <img src={profileAvatar} alt={`${profileUser?.user_metadata?.full_name || profileUser?.user_metadata?.name || 'Your'} profile photo`} />
+          <button type="button" className="primary-button" onClick={() => { setProfileAvatarPreviewOpen(false); profileAvatarInputRef.current?.click() }}><Icon name="edit" size={15} /> Change photo</button>
+        </section>
       </div>}
       {moneyModalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setMoneyModalOpen(false) }}>
         <form className="idea-modal money-modal" onSubmit={saveMoneyEntry}>
@@ -3092,6 +4299,8 @@ function pageSubtitle(page) {
     'Personal & life': 'Keep your personal goals and trip memories together in one calm, private space.',
     'Business exploration': 'Explore clothing, PG, event management, and water bottle business ideas.',
     Money: 'Track income, spending, EMIs, card purchases, and repayments together.',
+    'Gifts & occasions': 'Remember important dates, thoughtful gift ideas, and celebration plans.',
+    'Recipe ideas': 'Save recipes you want to try and the details you’ll need to make them again.',
     Journal: 'A private place to notice, reflect, and remember.',
     Habits: 'Tiny rituals that make your days feel a little more like yours.',
   }
