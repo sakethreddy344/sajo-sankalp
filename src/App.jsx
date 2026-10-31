@@ -27,6 +27,15 @@ const noteTableByType = {
 const maxBusinessImageSize = 5 * 1024 * 1024
 const maxBusinessImages = 8
 
+function formatMoney(amount) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    currencyDisplay: 'symbol',
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
 const initialIdeas = [
   { id: 'clothing-industry', title: 'Clothing industry', category: 'Business exploration', note: 'Explore customer, product, sourcing, startup cost, and sales channel.', color: 'peach', stage: 'To explore', icon: 'spark' },
   { id: 'pg-paying-guest', title: 'PG (paying guest)', category: 'Business exploration', note: 'Research locations, occupancy, rent, setup costs, and local requirements.', color: 'mint', stage: 'To explore', icon: 'globe' },
@@ -2275,7 +2284,6 @@ function App() {
   const weekday = appDate.toLocaleDateString('en-US', { weekday: 'long' })
   const monthDay = appDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
   const greeting = appDate.getHours() < 12 ? 'Good morning' : appDate.getHours() < 18 ? 'Good afternoon' : 'Good evening'
-  const formatMoney = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', currencyDisplay: 'symbol', maximumFractionDigits: 0 }).format(amount)
   const dueTomorrowNotifications = getDueTomorrowNotifications(activeEmis, cards, notificationDate)
   const careerGoalItems = goals.filter((goal) => goal.category === 'Career & skills')
   const selectedCareerTopic = careerTopics.find((topic) => topic.id === selectedCareerTopicId) || null
