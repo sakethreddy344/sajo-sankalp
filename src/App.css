@@ -3105,6 +3105,32 @@
 .trip-money-empty { margin: 8px 0; color: #89938b; font-size: 8px; }
 .trip-money-add-expense { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 7px; border: 1px solid #e8eee6; border-radius: 6px; background: #f8faf7; color: #64836a; cursor: pointer; font-size: 8px; font-weight: 600; }
 .trip-money-add-expense:hover { background: #edf4eb; }
+.trip-money-tools { display: flex; flex-wrap: wrap; gap: 7px; }
+.trip-booking-list { display: grid; margin-top: 8px; border-top: 1px solid #f0f1ee; }
+.trip-booking-item { border-bottom: 1px solid #f0f1ee; }
+.trip-booking-title { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px; border: 0; background: transparent; color: #536258; cursor: pointer; font: inherit; text-align: left; }
+.trip-booking-title:hover strong { color: #356a3e; }
+.trip-booking-title strong { overflow-wrap: anywhere; font-size: 8px; }
+.trip-booking-title span { flex: 0 0 auto; color: #89938b; font-size: 7px; }
+.trip-booking-notes-form,
+.trip-booking-add-form,
+.trip-booking-attachment-form { display: grid; gap: 7px; margin: 0 0 9px; padding: 9px; border: 1px solid #e8eee6; border-radius: 7px; background: #fbfcfa; }
+.trip-booking-notes-form label,
+.trip-booking-add-form label,
+.trip-booking-attachment-form label { display: flex; justify-content: space-between; gap: 8px; color: #536258; font-size: 8px; font-weight: 600; }
+.trip-booking-notes-form textarea,
+.trip-booking-add-form input,
+.trip-booking-attachment-form input { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid #e6eae4; border-radius: 6px; background: #fff; color: #3e4c42; font: inherit; font-size: 9px; }
+.trip-booking-attachment-form input[type="file"] { padding: 6px; }
+.trip-booking-notes-form textarea { resize: vertical; }
+.trip-booking-attachments { display: grid; gap: 6px; margin-bottom: 9px; }
+.trip-booking-attachments-heading { color: #536258; font-size: 8px; font-weight: 700; }
+.trip-booking-attachment-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.trip-booking-attachment-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 5px 7px; border: 1px solid #edf0eb; border-radius: 6px; background: #fff; }
+.trip-booking-attachment-list a,
+.trip-booking-attachment-list li > span { min-width: 0; overflow-wrap: anywhere; color: #536d56; font-size: 8px; }
+.trip-booking-attachment-list small { color: #89938b; font-size: 7px; }
+.trip-booking-attachment-form label span { color: #a1a8a0; font-weight: 500; }
 .trip-expense-form { display: grid; gap: 7px; margin-top: 9px; padding: 9px; border: 1px solid #e8eee6; border-radius: 7px; background: #fbfcfa; }
 .trip-expense-form label { display: flex; justify-content: space-between; gap: 8px; color: #536258; font-size: 8px; font-weight: 600; }
 .trip-expense-form label span { color: #a1a8a0; font-weight: 500; }

@@ -52,6 +52,10 @@ function formatMoney(amount) {
   }).format(amount)
 }
 
+function currentTimestamp() {
+  return new Date().toISOString()
+}
+
 const initialIdeas = [
   { id: 'clothing-industry', title: 'Clothing industry', category: 'Business exploration', note: 'Explore customer, product, sourcing, startup cost, and sales channel.', color: 'peach', stage: 'To explore', icon: 'spark' },
   { id: 'pg-paying-guest', title: 'PG (paying guest)', category: 'Business exploration', note: 'Research locations, occupancy, rent, setup costs, and local requirements.', color: 'mint', stage: 'To explore', icon: 'globe' },
@@ -248,6 +252,15 @@ function App() {
   const [tripMoneyTitle, setTripMoneyTitle] = useState('')
   const [tripMoneyError, setTripMoneyError] = useState('')
   const [expandedTripMoneyIds, setExpandedTripMoneyIds] = useState([])
+  const [bookingDetailFormTripId, setBookingDetailFormTripId] = useState('')
+  const [bookingDetailTitle, setBookingDetailTitle] = useState('')
+  const [selectedBookingDetail, setSelectedBookingDetail] = useState(null)
+  const [bookingDetailNotes, setBookingDetailNotes] = useState('')
+  const [bookingAttachmentName, setBookingAttachmentName] = useState('')
+  const [bookingAttachmentFile, setBookingAttachmentFile] = useState(null)
+  const [bookingAttachmentError, setBookingAttachmentError] = useState('')
+  const [bookingAttachmentUrls, setBookingAttachmentUrls] = useState({})
+  const bookingAttachmentInputRef = useRef(null)
   const [tripExpenseFormTripId, setTripExpenseFormTripId] = useState('')
   const [editingTripExpenseId, setEditingTripExpenseId] = useState('')
   const [tripExpenseDescription, setTripExpenseDescription] = useState('')
@@ -664,7 +677,7 @@ function App() {
       setTripsLoading(true)
       const { data, error } = await supabase
         .from('trips')
-        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, is_trip_money_analysis, trip_expenses, created_at')
+        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, is_trip_money_analysis, trip_expenses, booking_details, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
       if (error) throw error
@@ -689,6 +702,41 @@ function App() {
       active = false
     }
   }, [session, tripsReload])
+
+  useEffect(() => {
+    const detailSelection = selectedBookingDetail
+    const selectedTrip = trips.find((trip) => trip.id === detailSelection?.tripId)
+    const selectedDetail = selectedTrip && Array.isArray(selectedTrip.booking_details)
+      ? selectedTrip.booking_details.find((detail) => detail.id === detailSelection?.detailId)
+      : null
+    const attachments = Array.isArray(selectedDetail?.attachments) ? selectedDetail.attachments : []
+    if (!session || !supabase || attachments.length === 0) {
+      return undefined
+    }
+
+    let active = true
+    Promise.all(attachments.map(async (attachment) => {
+      if (!attachment?.path) return null
+      const { data, error } = await supabase.storage
+        .from(importantDocumentBucket)
+        .createSignedUrl(attachment.path, 3600)
+      if (error) throw error
+      return [attachment.path, data.signedUrl]
+    }))
+      .then((signedAttachments) => {
+        if (active) setBookingAttachmentUrls(Object.fromEntries(signedAttachments.filter(Boolean)))
+      })
+      .catch((error) => {
+        if (active) {
+          setBookingAttachmentUrls({})
+          setBookingAttachmentError(`Could not load booking attachments: ${error.message}`)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedBookingDetail, session, trips])
 
   useEffect(() => {
     if (!documentsOpen || !documentsUnlocked || documentsUnlockedUserId !== session?.user?.id || documentView !== 'carousel' || !supabase || !session) return undefined
@@ -2573,6 +2621,12 @@ function App() {
     setTripMoneyError('')
   }
 
+  const closeBookingDetailNotes = () => {
+    setSelectedBookingDetail(null)
+    setBookingAttachmentUrls({})
+    setBookingAttachmentError('')
+  }
+
   const openTripMoneyForm = (trip) => {
     setEditingTripMoneyId(trip?.id || '')
     setTripMoneyTitle(trip?.title || '')
@@ -2601,7 +2655,7 @@ function App() {
           .eq('id', editingTripMoneyId)
           .eq('user_id', session.user.id)
           .eq('is_trip_money_analysis', true)
-          .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+          .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
           .single()
         : await supabase.from('trips')
           .insert({
@@ -2612,8 +2666,9 @@ function App() {
             media: [],
             is_trip_money_analysis: true,
             trip_expenses: [],
+            booking_details: [],
           })
-          .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+          .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
           .single()
       if (result.error) throw result.error
       setTrips((current) => editingTripMoneyId
@@ -2648,6 +2703,19 @@ function App() {
       setTrips((current) => current.filter((item) => item.id !== trip.id))
       if (editingTripMoneyId === trip.id) resetTripMoneyForm()
       if (tripExpenseFormTripId === trip.id) resetTripExpenseForm()
+      const attachmentPaths = (Array.isArray(trip.booking_details) ? trip.booking_details : [])
+        .flatMap((detail) => Array.isArray(detail.attachments) ? detail.attachments : [])
+        .map((attachment) => attachment.path)
+        .filter((path) => typeof path === 'string' && path.length > 0)
+      if (attachmentPaths.length > 0) {
+        const { error: cleanupError } = await supabase.storage
+          .from(importantDocumentBucket)
+          .remove(attachmentPaths)
+        if (cleanupError) {
+          setTripMoneyError(`Trip "${trip.title}" was deleted, but its booking attachments could not be removed from storage: ${cleanupError.message}`)
+          return
+        }
+      }
       setNotice(`Deleted trip "${trip.title}".`)
       window.setTimeout(() => setNotice(''), 2600)
     } catch (error) {
@@ -2674,6 +2742,242 @@ function App() {
     setTripExpenseAmount(expense ? String(expense.amount) : '')
     setTripExpenseDate(expense?.date || dateInputValue(appDate))
     setTripMoneyError('')
+  }
+
+  const openBookingDetailForm = (trip) => {
+    setBookingDetailFormTripId(trip.id)
+    setBookingDetailTitle('')
+    setSelectedBookingDetail(null)
+    setBookingDetailNotes('')
+    setTripMoneyError('')
+  }
+
+  const openBookingDetailNotes = (trip, detail) => {
+    setBookingDetailFormTripId(trip.id)
+    setSelectedBookingDetail({ tripId: trip.id, detailId: detail.id })
+    setBookingDetailTitle('')
+    setBookingDetailNotes(detail.notes || '')
+    setBookingAttachmentName('')
+    setBookingAttachmentFile(null)
+    setBookingAttachmentError('')
+    setBookingAttachmentUrls({})
+    setTripMoneyError('')
+  }
+
+  const saveBookingDetail = async (event, trip) => {
+    event.preventDefault()
+    const title = bookingDetailTitle.trim()
+    if (!title) {
+      setTripMoneyError('Enter a booking detail subtitle.')
+      return
+    }
+    if (!supabase || !session) {
+      setTripMoneyError('Sign in to save booking details.')
+      return
+    }
+    const currentTrip = trips.find((item) => item.id === trip.id)
+    if (!currentTrip || !currentTrip.is_trip_money_analysis) {
+      setTripMoneyError('This trip could not be found. Refresh and try again.')
+      return
+    }
+    const currentDetails = Array.isArray(currentTrip.booking_details) ? currentTrip.booking_details : []
+    const details = [...currentDetails, { id: window.crypto.randomUUID(), title, notes: '' }]
+
+    setTripMoneyError('')
+    setCloudLoading(true)
+    try {
+      const { data, error } = await supabase.from('trips')
+        .update({ booking_details: details, updated_at: new Date().toISOString() })
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
+        .single()
+      if (error) throw error
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+      setBookingDetailTitle('')
+      setNotice(`Added "${title}" to ${trip.title} booking details.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setTripMoneyError(`Could not add this booking detail: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const saveBookingDetailNotes = async (event, trip) => {
+    event.preventDefault()
+    if (!selectedBookingDetail || selectedBookingDetail.tripId !== trip.id) return
+    if (!supabase || !session) {
+      setTripMoneyError('Sign in to save booking notes.')
+      return
+    }
+    const currentTrip = trips.find((item) => item.id === trip.id)
+    if (!currentTrip || !currentTrip.is_trip_money_analysis) {
+      setTripMoneyError('This trip could not be found. Refresh and try again.')
+      return
+    }
+    const currentDetails = Array.isArray(currentTrip.booking_details) ? currentTrip.booking_details : []
+    const details = currentDetails.map((detail) => detail.id === selectedBookingDetail.detailId
+      ? { ...detail, notes: bookingDetailNotes }
+      : detail)
+
+    setTripMoneyError('')
+    setCloudLoading(true)
+    try {
+      const { data, error } = await supabase.from('trips')
+        .update({ booking_details: details, updated_at: new Date().toISOString() })
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
+        .single()
+      if (error) throw error
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+      setNotice(`Saved notes for ${currentDetails.find((detail) => detail.id === selectedBookingDetail.detailId)?.title || 'booking detail'}.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setTripMoneyError(`Could not save these booking notes: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const addBookingAttachment = async (event, trip, detail) => {
+    event.preventDefault()
+    const name = bookingAttachmentName.trim()
+    const file = bookingAttachmentFile
+    if (!name) {
+      setBookingAttachmentError('Enter a name for this attachment.')
+      return
+    }
+    if (!file) {
+      setBookingAttachmentError('Choose a file to attach.')
+      return
+    }
+    if (!Object.hasOwn(importantDocumentTypes, file.type)) {
+      setBookingAttachmentError('Choose a PDF, image, text/CSV, Word, or Excel file.')
+      return
+    }
+    if (file.size > maxImportantDocumentSize) {
+      setBookingAttachmentError('Attachments must be 25 MB or smaller.')
+      return
+    }
+    if (!supabase || !session) {
+      setBookingAttachmentError('Sign in to add booking attachments.')
+      return
+    }
+
+    const currentTrip = trips.find((item) => item.id === trip.id)
+    const currentDetails = Array.isArray(currentTrip?.booking_details) ? currentTrip.booking_details : []
+    const currentDetail = currentDetails.find((item) => item.id === detail.id)
+    if (!currentTrip?.is_trip_money_analysis || !currentDetail) {
+      setBookingAttachmentError('This booking detail could not be found. Refresh and try again.')
+      return
+    }
+
+    const attachmentPath = `${session.user.id}/trip-bookings/${trip.id}/${detail.id}/${window.crypto.randomUUID()}.${importantDocumentTypes[file.type]}`
+    setBookingAttachmentError('')
+    setCloudLoading(true)
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from(importantDocumentBucket)
+        .upload(attachmentPath, file, { contentType: file.type, upsert: false })
+      if (uploadError) throw uploadError
+
+      const attachments = Array.isArray(currentDetail.attachments) ? currentDetail.attachments : []
+      const updatedDetails = currentDetails.map((item) => item.id === detail.id
+        ? { ...item, attachments: [...attachments, { id: window.crypto.randomUUID(), name, path: attachmentPath, type: file.type }] }
+        : item)
+      const { data, error } = await supabase.from('trips')
+        .update({ booking_details: updatedDetails, updated_at: currentTimestamp() })
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
+        .single()
+      if (error) {
+        const { error: cleanupError } = await supabase.storage.from(importantDocumentBucket).remove([attachmentPath])
+        if (cleanupError) throw new Error(`Could not save attachment details: ${error.message}. The uploaded file could not be removed: ${cleanupError.message}`)
+        throw error
+      }
+
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+      setBookingAttachmentName('')
+      setBookingAttachmentFile(null)
+      if (bookingAttachmentInputRef.current) bookingAttachmentInputRef.current.value = ''
+      setBookingAttachmentError('')
+      setNotice(`Added attachment "${name}" to ${detail.title}.`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setBookingAttachmentError(`Could not add this attachment: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteBookingAttachment = async (trip, detail, attachment) => {
+    if (!window.confirm(`Delete attachment "${attachment.name}"? This cannot be undone.`)) return
+    if (!supabase || !session) {
+      setBookingAttachmentError('Sign in to delete booking attachments.')
+      return
+    }
+
+    const currentTrip = trips.find((item) => item.id === trip.id)
+    const currentDetails = Array.isArray(currentTrip?.booking_details) ? currentTrip.booking_details : []
+    const currentDetail = currentDetails.find((item) => item.id === detail.id)
+    if (!currentTrip?.is_trip_money_analysis || !currentDetail) {
+      setBookingAttachmentError('This booking detail could not be found. Refresh and try again.')
+      return
+    }
+    const updatedDetails = currentDetails.map((item) => item.id === detail.id
+      ? { ...item, attachments: (Array.isArray(item.attachments) ? item.attachments : [])
+        .filter((file) => file.id !== attachment.id) }
+      : item)
+
+    setBookingAttachmentError('')
+    setCloudLoading(true)
+    try {
+      const { data, error } = await supabase.from('trips')
+        .update({ booking_details: updatedDetails, updated_at: currentTimestamp() })
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
+        .single()
+      if (error) throw error
+
+      if (attachment.path) {
+        const { error: removeError } = await supabase.storage
+          .from(importantDocumentBucket)
+          .remove([attachment.path])
+        if (removeError) {
+          const { error: rollbackError } = await supabase.from('trips')
+            .update({ booking_details: currentDetails, updated_at: currentTimestamp() })
+            .eq('id', trip.id)
+            .eq('user_id', session.user.id)
+            .eq('is_trip_money_analysis', true)
+          if (rollbackError) {
+            throw new Error(`Could not delete the attachment file: ${removeError.message}. Restoring its record also failed: ${rollbackError.message}`)
+          }
+          throw removeError
+        }
+      }
+
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+      setBookingAttachmentError('')
+      setBookingAttachmentUrls((current) => {
+        const next = { ...current }
+        delete next[attachment.path]
+        return next
+      })
+      setNotice(`Deleted attachment "${attachment.name}".`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setBookingAttachmentError(`Could not delete this attachment: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
   }
 
   const saveTripExpense = async (event, trip) => {
@@ -2718,7 +3022,7 @@ function App() {
         .eq('id', trip.id)
         .eq('user_id', session.user.id)
         .eq('is_trip_money_analysis', true)
-        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
         .single()
       if (error) throw error
       setTrips((current) => current.map((item) => item.id === data.id ? data : item))
@@ -2756,7 +3060,7 @@ function App() {
         .eq('id', trip.id)
         .eq('user_id', session.user.id)
         .eq('is_trip_money_analysis', true)
-        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, booking_details, created_at')
         .single()
       if (error) throw error
       setTrips((current) => current.map((item) => item.id === data.id ? data : item))
@@ -4054,7 +4358,114 @@ function App() {
                                   <button className="small-action" type="button" onClick={resetTripExpenseForm} disabled={cloudLoading}>Cancel</button>
                                 </div>
                               </form>}
-                              {!expenseFormOpen && <button type="button" className="trip-money-add-expense" onClick={() => openTripExpenseForm(trip)} disabled={cloudLoading}><Icon name="plus" size={13} /> Add spending</button>}
+                              <div className="trip-money-tools">
+                                {!expenseFormOpen && <button type="button" className="trip-money-add-expense" onClick={() => openTripExpenseForm(trip)} disabled={cloudLoading}><Icon name="plus" size={13} /> Add spending</button>}
+                                <button
+                                  type="button"
+                                  className="trip-money-add-expense"
+                                  aria-expanded={bookingDetailFormTripId === trip.id && !selectedBookingDetail}
+                                  onClick={() => bookingDetailFormTripId === trip.id && !selectedBookingDetail
+                                    ? setBookingDetailFormTripId('')
+                                    : openBookingDetailForm(trip)}
+                                  disabled={cloudLoading}
+                                >
+                                  <Icon name="plus" size={13} /> Booking details
+                                </button>
+                              </div>
+                              {Array.isArray(trip.booking_details) && trip.booking_details.length > 0 && <div className="trip-booking-list">
+                                {trip.booking_details.map((detail) => {
+                                  const notesOpen = selectedBookingDetail?.tripId === trip.id && selectedBookingDetail.detailId === detail.id
+                                  return <section className="trip-booking-item" key={detail.id}>
+                                    <button
+                                      type="button"
+                                      className="trip-booking-title"
+                                      aria-expanded={notesOpen}
+                                      onClick={() => notesOpen
+                                        ? closeBookingDetailNotes()
+                                        : openBookingDetailNotes(trip, detail)}
+                                    >
+                                      <strong>{detail.title}</strong>
+                                      <span>{notesOpen ? 'Hide notes' : detail.notes ? 'View notes' : 'Add notes'}</span>
+                                    </button>
+                                    {notesOpen && <>
+                                      <form className="trip-booking-notes-form" onSubmit={(event) => saveBookingDetailNotes(event, trip)}>
+                                        <label htmlFor={`trip-booking-notes-${trip.id}-${detail.id}`}>Notes for {detail.title}</label>
+                                        <textarea
+                                          id={`trip-booking-notes-${trip.id}-${detail.id}`}
+                                          rows={4}
+                                          maxLength={5000}
+                                          value={bookingDetailNotes}
+                                          onChange={(event) => setBookingDetailNotes(event.target.value)}
+                                          placeholder={`Add booking notes for ${detail.title}`}
+                                          disabled={cloudLoading}
+                                        />
+                                        <div className="subscription-form-actions">
+                                          <button className="primary-button" type="submit" disabled={cloudLoading}>{cloudLoading ? 'Saving…' : 'Save notes'}</button>
+                                          <button className="small-action" type="button" onClick={closeBookingDetailNotes} disabled={cloudLoading}>Close</button>
+                                        </div>
+                                      </form>
+                                      <div className="trip-booking-attachments">
+                                        <span className="trip-booking-attachments-heading">Attachments</span>
+                                        {Array.isArray(detail.attachments) && detail.attachments.length > 0
+                                          ? <ul className="trip-booking-attachment-list">{detail.attachments.map((attachment) => (
+                                            <li key={attachment.id}>
+                                              {bookingAttachmentUrls[attachment.path]
+                                                ? <a href={bookingAttachmentUrls[attachment.path]} target="_blank" rel="noreferrer">{attachment.name}</a>
+                                                : <span>{attachment.name} <small>Loading file…</small></span>}
+                                              <button type="button" className="transaction-delete available-card-delete" aria-label={`Delete attachment ${attachment.name}`} title="Delete attachment" disabled={cloudLoading} onClick={() => deleteBookingAttachment(trip, detail, attachment)}><Icon name="trash" size={14} /></button>
+                                            </li>
+                                          ))}</ul>
+                                          : <p className="trip-money-empty">No attachments added.</p>}
+                                        {bookingAttachmentError && <p className="subscription-error" role="alert">{bookingAttachmentError}</p>}
+                                        <form className="trip-booking-attachment-form" onSubmit={(event) => addBookingAttachment(event, trip, detail)}>
+                                          <label htmlFor={`trip-booking-attachment-name-${trip.id}-${detail.id}`}>Attachment name</label>
+                                          <input
+                                            id={`trip-booking-attachment-name-${trip.id}-${detail.id}`}
+                                            type="text"
+                                            maxLength={100}
+                                            value={bookingAttachmentName}
+                                            onChange={(event) => setBookingAttachmentName(event.target.value)}
+                                            placeholder="e.g. Hotel confirmation"
+                                            required
+                                            disabled={cloudLoading}
+                                          />
+                                          <label htmlFor={`trip-booking-attachment-file-${trip.id}-${detail.id}`}>Choose file <span>Up to 25 MB</span></label>
+                                          <input
+                                            ref={bookingAttachmentInputRef}
+                                            id={`trip-booking-attachment-file-${trip.id}-${detail.id}`}
+                                            type="file"
+                                            accept={Object.keys(importantDocumentTypes).join(',')}
+                                            onChange={(event) => {
+                                              setBookingAttachmentFile(event.target.files?.[0] || null)
+                                              setBookingAttachmentError('')
+                                            }}
+                                            required
+                                            disabled={cloudLoading}
+                                          />
+                                          <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name="plus" size={14} /> {cloudLoading ? 'Uploading…' : 'Add attachment'}</button>
+                                        </form>
+                                      </div>
+                                    </>}
+                                  </section>
+                                })}
+                              </div>}
+                              {bookingDetailFormTripId === trip.id && !selectedBookingDetail && <form className="trip-booking-add-form" onSubmit={(event) => saveBookingDetail(event, trip)}>
+                                <label htmlFor={`trip-booking-title-${trip.id}`}>Booking subtitle</label>
+                                <input
+                                  id={`trip-booking-title-${trip.id}`}
+                                  type="text"
+                                  maxLength={100}
+                                  value={bookingDetailTitle}
+                                  onChange={(event) => setBookingDetailTitle(event.target.value)}
+                                  placeholder="e.g. Rooms, Bus, Activities"
+                                  required
+                                  disabled={cloudLoading}
+                                />
+                                <div className="subscription-form-actions">
+                                  <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name="plus" size={14} /> {cloudLoading ? 'Adding…' : 'Add subtitle'}</button>
+                                  <button className="small-action" type="button" onClick={() => setBookingDetailFormTripId('')} disabled={cloudLoading}>Cancel</button>
+                                </div>
+                              </form>}
                               </div>}
                             </article>
                           })}</div>
