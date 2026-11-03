@@ -243,6 +243,16 @@ function App() {
   const [editingChitFundId, setEditingChitFundId] = useState(null)
   const [chitFundError, setChitFundError] = useState('')
   const [chitTransactionIds, setChitTransactionIds] = useState({})
+  const [tripMoneyFormOpen, setTripMoneyFormOpen] = useState(false)
+  const [editingTripMoneyId, setEditingTripMoneyId] = useState('')
+  const [tripMoneyTitle, setTripMoneyTitle] = useState('')
+  const [tripMoneyError, setTripMoneyError] = useState('')
+  const [expandedTripMoneyIds, setExpandedTripMoneyIds] = useState([])
+  const [tripExpenseFormTripId, setTripExpenseFormTripId] = useState('')
+  const [editingTripExpenseId, setEditingTripExpenseId] = useState('')
+  const [tripExpenseDescription, setTripExpenseDescription] = useState('')
+  const [tripExpenseAmount, setTripExpenseAmount] = useState('')
+  const [tripExpenseDate, setTripExpenseDate] = useState(dateInputValue(appDate))
   const [availableCards, setAvailableCards] = useState([])
   const [holdings, setHoldings] = useState([])
   const [holdingName, setHoldingName] = useState('')
@@ -651,9 +661,10 @@ function App() {
 
     let active = true
     const loadTrips = async () => {
+      setTripsLoading(true)
       const { data, error } = await supabase
         .from('trips')
-        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, created_at')
+        .select('id, user_id, title, trip_date, notes, media, is_wishlisted_place, is_completed, is_packing_checklist, is_important_document, is_trip_money_analysis, trip_expenses, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
       if (error) throw error
@@ -2555,6 +2566,210 @@ function App() {
     }
   }
 
+  const resetTripMoneyForm = () => {
+    setTripMoneyFormOpen(false)
+    setEditingTripMoneyId('')
+    setTripMoneyTitle('')
+    setTripMoneyError('')
+  }
+
+  const openTripMoneyForm = (trip) => {
+    setEditingTripMoneyId(trip?.id || '')
+    setTripMoneyTitle(trip?.title || '')
+    setTripMoneyError('')
+    setTripMoneyFormOpen(true)
+  }
+
+  const saveTripMoneyTrip = async (event) => {
+    event.preventDefault()
+    const title = tripMoneyTitle.trim()
+    if (!title) {
+      setTripMoneyError('Enter a trip name.')
+      return
+    }
+    if (!supabase || !session) {
+      setTripMoneyError('Sign in to save trip records.')
+      return
+    }
+
+    setTripMoneyError('')
+    setCloudLoading(true)
+    try {
+      const result = editingTripMoneyId
+        ? await supabase.from('trips')
+          .update({ title, updated_at: new Date().toISOString() })
+          .eq('id', editingTripMoneyId)
+          .eq('user_id', session.user.id)
+          .eq('is_trip_money_analysis', true)
+          .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+          .single()
+        : await supabase.from('trips')
+          .insert({
+            user_id: session.user.id,
+            title,
+            trip_date: '',
+            notes: '',
+            media: [],
+            is_trip_money_analysis: true,
+            trip_expenses: [],
+          })
+          .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+          .single()
+      if (result.error) throw result.error
+      setTrips((current) => editingTripMoneyId
+        ? current.map((trip) => trip.id === result.data.id ? result.data : trip)
+        : [result.data, ...current])
+      setNotice(`Trip "${title}" ${editingTripMoneyId ? 'updated' : 'added'}.`)
+      window.setTimeout(() => setNotice(''), 2600)
+      resetTripMoneyForm()
+    } catch (error) {
+      setTripMoneyError(`Could not save this trip: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteTripMoneyTrip = async (trip) => {
+    if (!window.confirm(`Delete "${trip.title}" and all its trip-only expenses? This cannot be undone.`)) return
+    if (!supabase || !session) {
+      setTripMoneyError('Sign in to delete trip records.')
+      return
+    }
+
+    setTripMoneyError('')
+    setCloudLoading(true)
+    try {
+      const { error } = await supabase.from('trips')
+        .delete()
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+      if (error) throw error
+      setTrips((current) => current.filter((item) => item.id !== trip.id))
+      if (editingTripMoneyId === trip.id) resetTripMoneyForm()
+      if (tripExpenseFormTripId === trip.id) resetTripExpenseForm()
+      setNotice(`Deleted trip "${trip.title}".`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setTripMoneyError(`Could not delete this trip: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const resetTripExpenseForm = () => {
+    setTripExpenseFormTripId('')
+    setEditingTripExpenseId('')
+    setTripExpenseDescription('')
+    setTripExpenseAmount('')
+    setTripExpenseDate(dateInputValue(appDate))
+    setTripMoneyError('')
+  }
+
+  const openTripExpenseForm = (trip, expense) => {
+    setExpandedTripMoneyIds((current) => current.includes(trip.id) ? current : [...current, trip.id])
+    setTripExpenseFormTripId(trip.id)
+    setEditingTripExpenseId(expense?.id || '')
+    setTripExpenseDescription(expense?.description || '')
+    setTripExpenseAmount(expense ? String(expense.amount) : '')
+    setTripExpenseDate(expense?.date || dateInputValue(appDate))
+    setTripMoneyError('')
+  }
+
+  const saveTripExpense = async (event, trip) => {
+    event.preventDefault()
+    const description = tripExpenseDescription.trim()
+    const amount = Number(tripExpenseAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTripMoneyError('Enter a valid trip expense amount.')
+      return
+    }
+    if (!tripExpenseDate) {
+      setTripMoneyError('Enter the expense date.')
+      return
+    }
+    if (!supabase || !session) {
+      setTripMoneyError('Sign in to save trip expenses.')
+      return
+    }
+
+    const currentTrip = trips.find((item) => item.id === trip.id)
+    if (!currentTrip || !currentTrip.is_trip_money_analysis) {
+      setTripMoneyError('This trip could not be found. Refresh and try again.')
+      return
+    }
+    const existingExpenses = Array.isArray(currentTrip.trip_expenses) ? currentTrip.trip_expenses : []
+    const updatedExpenses = editingTripExpenseId
+      ? existingExpenses.map((expense) => expense.id === editingTripExpenseId
+        ? { ...expense, description, amount, date: tripExpenseDate }
+        : expense)
+      : [...existingExpenses, {
+        id: window.crypto.randomUUID(),
+        description,
+        amount,
+        date: tripExpenseDate,
+      }]
+
+    setTripMoneyError('')
+    setCloudLoading(true)
+    try {
+      const { data, error } = await supabase.from('trips')
+        .update({ trip_expenses: updatedExpenses, updated_at: new Date().toISOString() })
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+        .single()
+      if (error) throw error
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+      setNotice(`${editingTripExpenseId ? 'Updated' : 'Added'} trip expense for "${trip.title}".`)
+      window.setTimeout(() => setNotice(''), 2600)
+      resetTripExpenseForm()
+    } catch (error) {
+      setTripMoneyError(`Could not save this trip expense: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  const deleteTripExpense = async (trip, expense) => {
+    if (!window.confirm(`Delete this ${formatMoney(Number(expense.amount))} trip expense?`)) return
+    if (!supabase || !session) {
+      setTripMoneyError('Sign in to delete trip expenses.')
+      return
+    }
+
+    const currentTrip = trips.find((item) => item.id === trip.id)
+    if (!currentTrip || !currentTrip.is_trip_money_analysis) {
+      setTripMoneyError('This trip could not be found. Refresh and try again.')
+      return
+    }
+    setTripMoneyError('')
+    setCloudLoading(true)
+    try {
+      const { data, error } = await supabase.from('trips')
+        .update({
+          trip_expenses: (Array.isArray(currentTrip.trip_expenses) ? currentTrip.trip_expenses : [])
+            .filter((item) => item.id !== expense.id),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', trip.id)
+        .eq('user_id', session.user.id)
+        .eq('is_trip_money_analysis', true)
+        .select('id, user_id, title, trip_date, notes, media, is_trip_money_analysis, trip_expenses, created_at')
+        .single()
+      if (error) throw error
+      setTrips((current) => current.map((item) => item.id === data.id ? data : item))
+      if (editingTripExpenseId === expense.id) resetTripExpenseForm()
+      setNotice(`Deleted trip expense from "${trip.title}".`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (error) {
+      setTripMoneyError(`Could not delete this trip expense: ${error.message}`)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
   const addAvailableCard = async (event) => {
     event.preventDefault()
     const name = availableCardName.trim()
@@ -3054,7 +3269,8 @@ function App() {
   }).sort((first, second) => first.daysUntil - second.daysUntil)
 
   const wishlistPlaces = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_wishlisted_place && !trip.is_important_document)
-  const regularTrips = trips.filter((trip) => trip.user_id === session?.user?.id && !trip.is_wishlisted_place && !trip.is_packing_checklist && !trip.is_important_document)
+  const regularTrips = trips.filter((trip) => trip.user_id === session?.user?.id && !trip.is_wishlisted_place && !trip.is_packing_checklist && !trip.is_important_document && !trip.is_trip_money_analysis)
+  const tripMoneyTrips = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_trip_money_analysis)
   const importantDocuments = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_important_document)
   const documentsAreUnlocked = documentsUnlocked && documentsUnlockedUserId === session?.user?.id
   const normalizedQuery = query.trim().toLowerCase()
@@ -3766,6 +3982,83 @@ function App() {
                         </article>
                       })}</div>
                       : <p className="commitment-empty">Add a chit fund to track its monthly payments and remaining months.</p>}
+                  </section>
+                  <section className="panel commitment-panel trip-money-panel">
+                    <div className="section-heading">
+                      <div><span className="section-kicker">TRIP-ONLY RECORDS</span><h2>Trip Money Analysis <span className="heading-count">{tripMoneyTrips.length}</span></h2></div>
+                      {!tripMoneyFormOpen && <button type="button" className="primary-button subscription-add-button" onClick={() => openTripMoneyForm()} disabled={cloudLoading || !session}><Icon name="plus" size={14} /> Add trip</button>}
+                    </div>
+                    <p className="trip-money-note">These trip expenses are separate from your main income and spending records.</p>
+                    {tripMoneyFormOpen && <form className="subscription-form trip-money-form" onSubmit={saveTripMoneyTrip}>
+                      <label htmlFor="trip-money-title">Trip name</label>
+                      <input id="trip-money-title" type="text" maxLength={100} value={tripMoneyTitle} onChange={(event) => setTripMoneyTitle(event.target.value)} placeholder="e.g. Goa weekend" required disabled={cloudLoading} />
+                      {tripMoneyError && <p className="subscription-error" role="alert">{tripMoneyError}</p>}
+                      <div className="subscription-form-actions">
+                        <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name={editingTripMoneyId ? 'check' : 'plus'} size={14} /> {cloudLoading ? 'Saving…' : editingTripMoneyId ? 'Save changes' : 'Add trip'}</button>
+                        <button className="small-action" type="button" onClick={resetTripMoneyForm} disabled={cloudLoading}>Cancel</button>
+                      </div>
+                    </form>}
+                    {tripMoneyError && !tripMoneyFormOpen && <p className="subscription-error" role="alert">{tripMoneyError}</p>}
+                    {tripsError && <p className="subscription-error" role="alert">{tripsError}<button type="button" className="business-note-retry" onClick={() => { setTripsError(''); setTripsLoading(true); setTripsReload((count) => count + 1) }}>Try again</button></p>}
+                    {!session
+                      ? <p className="commitment-empty">Sign in to create and maintain trip-only records.</p>
+                      : tripsLoading && !tripsLoaded
+                        ? <p className="commitment-empty">Loading your trip records…</p>
+                        : tripMoneyTrips.length > 0
+                          ? <div className="trip-money-list">{tripMoneyTrips.map((trip) => {
+                            const expenses = Array.isArray(trip.trip_expenses) ? trip.trip_expenses : []
+                            const tripTotal = expenses.reduce((total, expense) => total + (Number(expense.amount) || 0), 0)
+                            const expenseFormOpen = tripExpenseFormTripId === trip.id
+                            const tripExpanded = expandedTripMoneyIds.includes(trip.id)
+                            return <article className="trip-money-item" key={trip.id}>
+                              <div className="trip-money-heading">
+                                <button
+                                  type="button"
+                                  className="trip-money-title"
+                                  aria-expanded={tripExpanded}
+                                  aria-controls={`trip-money-details-${trip.id}`}
+                                  onClick={() => setExpandedTripMoneyIds((current) => tripExpanded
+                                    ? current.filter((id) => id !== trip.id)
+                                    : [...current, trip.id])}
+                                >
+                                  <strong>{trip.title}</strong>
+                                  <span>{expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'} · {tripExpanded ? 'Hide details' : 'View details'}</span>
+                                </button>
+                                <span className="trip-money-total">{formatMoney(tripTotal)}</span>
+                                <div className="chit-fund-actions">
+                                  <button type="button" className="transaction-edit commitment-edit" aria-label={`Edit trip: ${trip.title}`} title="Edit trip" disabled={cloudLoading} onClick={() => openTripMoneyForm(trip)}><Icon name="edit" size={15} /></button>
+                                  <button type="button" className="transaction-delete commitment-delete" aria-label={`Delete trip: ${trip.title}`} title="Delete trip" disabled={cloudLoading} onClick={() => deleteTripMoneyTrip(trip)}><Icon name="trash" size={15} /></button>
+                                </div>
+                              </div>
+                              {tripExpanded && <div id={`trip-money-details-${trip.id}`} className="trip-money-details">
+                                {expenses.length > 0
+                                  ? <div className="trip-money-expenses">{expenses.map((expense) => <div className="trip-money-expense" key={expense.id}>
+                                    <div><strong>{expense.description || 'Trip spending'}</strong><span>{expense.date || ''}</span></div>
+                                    <strong className="trip-money-expense-amount">{formatMoney(Number(expense.amount) || 0)}</strong>
+                                    <div className="chit-fund-actions">
+                                      <button type="button" className="transaction-edit commitment-edit" aria-label={`Edit ${expense.description || 'trip expense'}`} title="Edit expense" disabled={cloudLoading} onClick={() => openTripExpenseForm(trip, expense)}><Icon name="edit" size={14} /></button>
+                                      <button type="button" className="transaction-delete commitment-delete" aria-label={`Delete ${expense.description || 'trip expense'}`} title="Delete expense" disabled={cloudLoading} onClick={() => deleteTripExpense(trip, expense)}><Icon name="trash" size={14} /></button>
+                                    </div>
+                                  </div>)}</div>
+                                  : <p className="trip-money-empty">No expenses recorded for this trip yet.</p>}
+                              {expenseFormOpen && <form className="trip-expense-form" onSubmit={(event) => saveTripExpense(event, trip)}>
+                                <label htmlFor={`trip-expense-description-${trip.id}`}>Expense description <span>Optional</span></label>
+                                <input id={`trip-expense-description-${trip.id}`} type="text" maxLength={100} value={tripExpenseDescription} onChange={(event) => setTripExpenseDescription(event.target.value)} placeholder="e.g. Hotel, food, transport" disabled={cloudLoading} />
+                                <div className="trip-expense-fields">
+                                  <div><label htmlFor={`trip-expense-amount-${trip.id}`}>Amount (₹)</label><input id={`trip-expense-amount-${trip.id}`} type="number" min="0.01" step="0.01" value={tripExpenseAmount} onChange={(event) => setTripExpenseAmount(event.target.value)} placeholder="0.00" required disabled={cloudLoading} /></div>
+                                  <div><label htmlFor={`trip-expense-date-${trip.id}`}>Date</label><input id={`trip-expense-date-${trip.id}`} type="date" value={tripExpenseDate} onChange={(event) => setTripExpenseDate(event.target.value)} required disabled={cloudLoading} /></div>
+                                </div>
+                                {tripMoneyError && <p className="subscription-error" role="alert">{tripMoneyError}</p>}
+                                <div className="subscription-form-actions">
+                                  <button className="primary-button" type="submit" disabled={cloudLoading}><Icon name={editingTripExpenseId ? 'check' : 'plus'} size={14} /> {cloudLoading ? 'Saving…' : editingTripExpenseId ? 'Save expense' : 'Add expense'}</button>
+                                  <button className="small-action" type="button" onClick={resetTripExpenseForm} disabled={cloudLoading}>Cancel</button>
+                                </div>
+                              </form>}
+                              {!expenseFormOpen && <button type="button" className="trip-money-add-expense" onClick={() => openTripExpenseForm(trip)} disabled={cloudLoading}><Icon name="plus" size={13} /> Add spending</button>}
+                              </div>}
+                            </article>
+                          })}</div>
+                          : <p className="commitment-empty">Add a trip, then record multiple expenses. Each trip keeps its own total.</p>}
                   </section>
               </div>
             </div>
