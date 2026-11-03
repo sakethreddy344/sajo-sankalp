@@ -18,6 +18,8 @@ The Trips section includes a places wishlist stored in the existing `trips` tabl
 
 Trips also includes one saved packing checklist and a password-gated Important documents area; both reuse the existing `trips` table, with attachments in the private `important-documents` Storage bucket. Run [`supabase/migrations/20261031000002_trip_checklist_documents.sql`](./supabase/migrations/20261031000002_trip_checklist_documents.sql) after the wishlist migration. Documents support PDF, common image, text/CSV, Word, and Excel files up to 25 MB. The password prompt verifies the signed-in account's current password and is an additional UI check, not file encryption; private Storage policies continue to enforce account ownership.
 
+Trip Money Analysis appears below Chit fund in Money. It reuses the existing `trips` table to save separate trip records and multiple expenses per trip; these entries never affect the main income or spending records. Run [`supabase/migrations/20261103000000_trip_money_analysis.sql`](./supabase/migrations/20261103000000_trip_money_analysis.sql) in the Supabase SQL Editor after the trips migration.
+
 Available credit card names are stored separately from cards used for payment tracking. Run [`supabase/migrations/20261028000004_available_credit_cards.sql`](./supabase/migrations/20261028000004_available_credit_cards.sql) in the Supabase SQL Editor to set up the private, user-scoped list.
 
 EMI completion status is stored on the existing `emis` table; no new table is required. Run [`supabase/migrations/20261029000000_emi_completion.sql`](./supabase/migrations/20261029000000_emi_completion.sql) in the Supabase SQL Editor to enable marking EMIs as completed.
