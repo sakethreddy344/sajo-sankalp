@@ -342,6 +342,8 @@ function App() {
   const [businessNoteInitialImagePaths, setBusinessNoteInitialImagePaths] = useState([])
   const [businessNoteImages, setBusinessNoteImages] = useState([])
   const [businessNoteFiles, setBusinessNoteFiles] = useState([])
+  const [personalNoteImageIndex, setPersonalNoteImageIndex] = useState(0)
+  const [personalNoteImageView, setPersonalNoteImageView] = useState('all')
   const [businessNoteLoading, setBusinessNoteLoading] = useState(false)
   const [businessNoteSaving, setBusinessNoteSaving] = useState(false)
   const [businessNoteLoadError, setBusinessNoteLoadError] = useState('')
@@ -1033,6 +1035,11 @@ function App() {
     ...tripSignedMedia,
     ...tripMediaFiles.map((item) => ({ ...item, url: item.previewUrl, local: true })),
   ]
+  const personalNoteImages = [
+    ...businessNoteImages.map((image) => ({ ...image, key: image.path })),
+    ...businessNoteFiles.map((image) => ({ ...image, url: image.previewUrl, key: image.previewUrl, local: true })),
+  ]
+  const selectedPersonalNoteImageIndex = Math.min(personalNoteImageIndex, Math.max(personalNoteImages.length - 1, 0))
   const yearTransactions = transactions.filter((entry) => entry.date?.slice(0, 4) === String(selectedYear))
   const monthTransactions = yearTransactions.filter((entry) => entry.date?.slice(0, 7) === selectedMonthKey)
   const totalHoldingsValue = holdings.reduce((total, holding) => total + Number(holding.current_value || 0), 0)
@@ -1359,6 +1366,8 @@ function App() {
     setBusinessNoteInitialImagePaths([])
     setBusinessNoteImages([])
     setBusinessNoteFiles([])
+    setPersonalNoteImageIndex(0)
+    setPersonalNoteImageView('all')
     setBusinessNoteLoadError('')
     setBusinessNoteError('')
     setBusinessImageError('')
@@ -1369,6 +1378,16 @@ function App() {
   const openPersonalGoalNotes = (goal) => {
     const id = goal.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     openSavedNotes({ id, title: goal.title }, 'personal')
+  }
+
+  const removePersonalNoteImage = (image) => {
+    if (image.local) {
+      URL.revokeObjectURL(image.previewUrl)
+      setBusinessNoteFiles((current) => current.filter((entry) => entry.previewUrl !== image.previewUrl))
+    } else {
+      setBusinessNoteImages((current) => current.filter((entry) => entry.path !== image.path))
+      setBusinessNoteImagePaths((current) => current.filter((path) => path !== image.path))
+    }
   }
 
   const openTrips = () => {
@@ -5068,7 +5087,32 @@ function App() {
             <label htmlFor="business-note-images">Images <span>UP TO {maxBusinessImages}, 5 MB EACH</span></label>
             <input id="business-note-images" className="business-note-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={selectBusinessNoteImages} disabled={businessNoteSaving || businessNoteImagePaths.length + businessNoteFiles.length >= maxBusinessImages} />
             {businessImageError && <p className="business-note-image-error" role="alert">{businessImageError}</p>}
-            {(businessNoteImages.length > 0 || businessNoteFiles.length > 0) && <div className="business-note-image-grid">
+            {selectedNoteType === 'personal' && personalNoteImages.length > 0 && <>
+              <div className="personal-note-image-tabs" role="tablist" aria-label="Attached image view">
+                <button type="button" role="tab" aria-selected={personalNoteImageView === 'all'} className={personalNoteImageView === 'all' ? 'personal-note-image-tab personal-note-image-tab-active' : 'personal-note-image-tab'} onClick={() => setPersonalNoteImageView('all')}>All images</button>
+                <button type="button" role="tab" aria-selected={personalNoteImageView === 'carousel'} className={personalNoteImageView === 'carousel' ? 'personal-note-image-tab personal-note-image-tab-active' : 'personal-note-image-tab'} onClick={() => setPersonalNoteImageView('carousel')}>Carousel view</button>
+              </div>
+              {personalNoteImageView === 'all'
+                ? <div className="business-note-image-grid">
+                  {personalNoteImages.map((image, index) => <div className="business-note-image" key={image.key}>
+                    <a href={image.url} target="_blank" rel="noreferrer"><img src={image.url} alt={`Attachment ${index + 1} for ${selectedIdea.title}`} /></a>
+                    <button type="button" onClick={() => removePersonalNoteImage(image)} aria-label={`Remove image ${index + 1}`} disabled={businessNoteSaving}><Icon name="close" size={14} /></button>
+                  </div>)}
+                </div>
+                : <div className="personal-note-carousel">
+                  <a className="personal-note-carousel-image" href={personalNoteImages[selectedPersonalNoteImageIndex].url} target="_blank" rel="noreferrer">
+                    <img src={personalNoteImages[selectedPersonalNoteImageIndex].url} alt={`Attachment ${selectedPersonalNoteImageIndex + 1} for ${selectedIdea.title}`} />
+                  </a>
+                  {personalNoteImages.length > 1 && <>
+                    <button type="button" className="personal-note-carousel-control personal-note-carousel-previous" aria-label="Previous image" onClick={() => setPersonalNoteImageIndex((selectedPersonalNoteImageIndex - 1 + personalNoteImages.length) % personalNoteImages.length)}><Icon name="chevron" size={19} /></button>
+                    <button type="button" className="personal-note-carousel-control personal-note-carousel-next" aria-label="Next image" onClick={() => setPersonalNoteImageIndex((selectedPersonalNoteImageIndex + 1) % personalNoteImages.length)}><Icon name="chevron" size={19} /></button>
+                    <span className="personal-note-carousel-count">{selectedPersonalNoteImageIndex + 1} / {personalNoteImages.length}</span>
+                    <div className="personal-note-carousel-dots">{personalNoteImages.map((image, index) => <button type="button" key={image.key} className={index === selectedPersonalNoteImageIndex ? 'personal-note-carousel-dot personal-note-carousel-dot-active' : 'personal-note-carousel-dot'} aria-label={`Show image ${index + 1}`} onClick={() => setPersonalNoteImageIndex(index)} />)}</div>
+                  </>}
+                  <button type="button" className="personal-note-image-remove" aria-label="Remove attached image" onClick={() => removePersonalNoteImage(personalNoteImages[selectedPersonalNoteImageIndex])} disabled={businessNoteSaving}><Icon name="close" size={14} /></button>
+                </div>}
+            </>}
+            {selectedNoteType === 'business' && (businessNoteImages.length > 0 || businessNoteFiles.length > 0) && <div className="business-note-image-grid">
               {businessNoteImages.map((image) => <div className="business-note-image" key={image.path}><a href={image.url} target="_blank" rel="noreferrer"><img src={image.url} alt={`Attachment for ${selectedIdea.title}`} /></a><button type="button" onClick={() => { setBusinessNoteImages((current) => current.filter((entry) => entry.path !== image.path)); setBusinessNoteImagePaths((current) => current.filter((path) => path !== image.path)) }} aria-label="Remove attached image" disabled={businessNoteSaving}><Icon name="close" size={14} /></button></div>)}
               {businessNoteFiles.map((image) => <div className="business-note-image" key={image.previewUrl}><img src={image.previewUrl} alt={`New attachment for ${selectedIdea.title}`} /><button type="button" onClick={() => { URL.revokeObjectURL(image.previewUrl); setBusinessNoteFiles((current) => current.filter((entry) => entry.previewUrl !== image.previewUrl)) }} aria-label="Remove selected image" disabled={businessNoteSaving}><Icon name="close" size={14} /></button></div>)}
             </div>}
