@@ -4,6 +4,18 @@ This template provides a minimal setup to get React working in Vite with HMR and
 
 The account profile menu lets you view the profile photo larger or replace it. A selected photo is resized and stored in this browser only.
 
+## AI assistant
+
+The AI analysis button opens a chat with current-month money analysis, trip-spending analysis, and open-ended questions about the signed-in workspace. The assistant sends only the relevant text and financial fields to Groq when a request is made. It never sends important documents, files, attachments, images, or storage links. Review AI-generated answers before relying on them.
+
+Chat conversations are saved to the private, user-scoped `ai_chat_conversations` table and appear under Recent chats, including after starting a new chat. Run [`supabase/migrations/20261105000000_ai_chat_history.sql`](./supabase/migrations/20261105000000_ai_chat_history.sql) and [`supabase/migrations/20261105000001_ai_chat_history_delete.sql`](./supabase/migrations/20261105000001_ai_chat_history_delete.sql) in the Supabase SQL Editor before deploying the frontend changes. Chats can be renamed or permanently deleted from Recent chats.
+
+The Groq API key is used only by the authenticated Supabase Edge Function; never add it to a `VITE_` variable. Copy the `GROQ_API_KEY` and optional `GROQ_MODEL` entries from [`.env.example`](./.env.example) into your ignored local `.env` file. For local Supabase development, serve the function with `supabase functions serve ai-assistant --env-file .env`. The function requires a signed-in Supabase user.
+
+Deploy the function with `supabase functions deploy ai-assistant`, then set `GROQ_API_KEY` in Supabase project secrets (for example, `supabase secrets set GROQ_API_KEY=your-key`). Set `GROQ_MODEL` in Supabase Function secrets as well to select an available Groq chat model. The default is `openai/gpt-oss-120b`; `llama-3.3-70b-versatile` was retired on August 16, 2026.
+
+Assistant system prompts are maintained in [`supabase/functions/_shared/ai-prompts.ts`](./supabase/functions/_shared/ai-prompts.ts). Edit that file to adjust money analysis, trip analysis, or general chat behavior, then redeploy the function for the change to take effect.
+
 ## Business exploration notes
 
 Business exploration notes are saved per idea in the `business_exploration_notes` Supabase table. Attached images are stored in the private `business-exploration-images` Storage bucket; the table keeps their paths. Row-level security policies restrict notes and images to their signed-in owner.

@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import AIAssistant from './AIAssistant'
+import useConfirmDialog from './ConfirmDialog'
+import { buildAiContext } from './aiContext'
 import { fromCardRow, fromChitFundRow, fromEmiRow, fromMoneyEntryRow, toCardRow, toChitFundRow, toEmiRow, toMoneyEntryRow } from './moneyData'
 import { supabase, supabaseConfigured } from './supabase'
 import './App.css'
@@ -223,11 +226,19 @@ function Icon({ name, size = 18, className = '' }) {
 }
 
 function App() {
+  const { confirmAction, confirmationDialog } = useConfirmDialog()
   const [activePage, setActivePage] = useState('Overview')
   const [ideas, setIdeas] = usePersistentState('daymark-ideas', initialIdeas)
   const [goals] = usePersistentState('daymark-goals', initialGoals)
   const [selectedCareerGoal, setSelectedCareerGoal] = useState('')
   const [careerTopics, setCareerTopics] = useState([])
+  const [aiCareerTopics, setAiCareerTopics] = useState([])
+  const [aiCareerTopicsLoadedKey, setAiCareerTopicsLoadedKey] = useState('')
+  const [aiCareerTopicsError, setAiCareerTopicsError] = useState('')
+  const [aiWorkspaceNotes, setAiWorkspaceNotes] = useState([])
+  const [aiWorkspaceNotesLoadedKey, setAiWorkspaceNotesLoadedKey] = useState('')
+  const [aiWorkspaceNotesError, setAiWorkspaceNotesError] = useState('')
+  const [aiWorkspaceNotesReload, setAiWorkspaceNotesReload] = useState(0)
   const [careerTopicsLoading, setCareerTopicsLoading] = useState(false)
   const [careerTopicsError, setCareerTopicsError] = useState('')
   const [careerTopicsReload, setCareerTopicsReload] = useState(0)
@@ -424,6 +435,7 @@ function App() {
   const [availableCardName, setAvailableCardName] = useState('')
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const searchInputRef = useRef(null)
   const searchContainerRef = useRef(null)
   const authUserIdRef = useRef('')
@@ -442,6 +454,10 @@ function App() {
   const cloudDataLoading = Boolean(session && cloudLoadedKey !== cloudRequestKey && !cloudLoadError)
   const personalCollectionsKey = session ? `${session.user.id}:${personalCollectionsReload}` : ''
   const personalCollectionsLoading = Boolean(session && personalCollectionsLoadedKey !== personalCollectionsKey)
+  const aiCareerTopicsKey = session ? `${session.user.id}:${careerTopicsReload}` : ''
+  const aiCareerTopicsLoading = Boolean(session && aiCareerTopicsLoadedKey !== aiCareerTopicsKey)
+  const aiWorkspaceNotesKey = session ? `${session.user.id}:${aiWorkspaceNotesReload}` : ''
+  const aiWorkspaceNotesLoading = Boolean(session && aiWorkspaceNotesLoadedKey !== aiWorkspaceNotesKey)
 
   useEffect(() => {
     if (!supabaseConfigured || !supabase) {
@@ -470,6 +486,9 @@ function App() {
       setStreakError('')
       if (authUserIdRef.current && authUserIdRef.current !== nextUserId) {
         setCareerTopics([])
+        setAiCareerTopics([])
+        setAiCareerTopicsLoadedKey('')
+        setAiCareerTopicsError('')
         setSelectedCareerGoal('')
         setSelectedCareerTopicId('')
         setCareerTopicNotes('')
@@ -604,6 +623,86 @@ function App() {
       active = false
     }
   }, [session, selectedCareerGoal, careerTopicsReload, selectedCareerTopicId])
+
+  useEffect(() => {
+    if (!session || !supabase) return undefined
+
+    let active = true
+    supabase
+      .from('career_skill_topics')
+      .select('id, goal_title, parent_id, title, notes, created_at, updated_at')
+      .eq('user_id', session.user.id)
+      .order('goal_title')
+      .order('created_at')
+      .then(({ data, error }) => {
+        if (error) throw error
+        if (!active) return
+        setAiCareerTopics(data)
+        setAiCareerTopicsError('')
+        setAiCareerTopicsLoadedKey(aiCareerTopicsKey)
+      })
+      .catch((error) => {
+        if (!active) return
+        setAiCareerTopicsError(`Could not load career and skills data for AI: ${error.message}`)
+        setAiCareerTopicsLoadedKey(aiCareerTopicsKey)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [session, aiCareerTopicsKey])
+
+  useEffect(() => {
+    if (!session || !supabase) return undefined
+
+    let active = true
+    const loadWorkspaceNotes = async () => {
+      const [businessResult, personalResult] = await Promise.all([
+        supabase
+          .from(noteTableByType.business.table)
+          .select('idea_title, content, updated_at')
+          .eq('user_id', session.user.id)
+          .order('updated_at', { ascending: false })
+          .limit(30),
+        supabase
+          .from(noteTableByType.personal.table)
+          .select('goal_title, content, updated_at')
+          .eq('user_id', session.user.id)
+          .order('updated_at', { ascending: false })
+          .limit(30),
+      ])
+      if (businessResult.error) throw businessResult.error
+      if (personalResult.error) throw personalResult.error
+      if (!active) return
+
+      setAiWorkspaceNotes([
+        ...(businessResult.data || []).map((note) => ({
+          type: 'business',
+          title: note.idea_title,
+          content: note.content,
+          updatedAt: note.updated_at,
+        })),
+        ...(personalResult.data || []).map((note) => ({
+          type: 'personal',
+          title: note.goal_title,
+          content: note.content,
+          updatedAt: note.updated_at,
+        })),
+      ])
+      setAiWorkspaceNotesError('')
+      setAiWorkspaceNotesLoadedKey(aiWorkspaceNotesKey)
+    }
+
+    loadWorkspaceNotes().catch((error) => {
+      if (!active) return
+      setAiWorkspaceNotesError(`Could not load personal-life and business notes for AI: ${error.message}`)
+      setAiWorkspaceNotesLoadedKey(aiWorkspaceNotesKey)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [session, aiWorkspaceNotesKey])
 
   useEffect(() => {
     if (!session || !supabase) return undefined
@@ -1424,7 +1523,11 @@ function App() {
     const confirmation = isWishlistPlace
       ? `Remove "${trip.title}" from your places wishlist? This cannot be undone.`
       : `Delete "${trip.title}" and all its saved memories? This cannot be undone.`
-    if (!window.confirm(confirmation)) return
+    if (!await confirmAction({
+      title: `Remove this ${recordName.toLowerCase()}?`,
+      message: confirmation,
+      confirmLabel: isWishlistPlace ? 'Remove place' : 'Delete trip',
+    })) return
     if (!supabase || !session) {
       const message = `Sign in to ${isWishlistPlace ? 'remove this place from your wishlist' : 'delete this trip'}.`
       if (isWishlistPlace) setWishlistError(message)
@@ -1696,7 +1799,10 @@ function App() {
   }
 
   const deleteImportantDocument = async (document) => {
-    if (!window.confirm(`Delete "${document.title}" and its attachment? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this document?',
+      message: `Delete "${document.title}" and its attachment? This cannot be undone.`,
+    })) return
     if (!supabase || !session || !documentsAreUnlocked || documentsUnlockedUserId !== session.user.id) {
       setDocumentError('Unlock Important documents again before deleting.')
       return
@@ -1932,6 +2038,7 @@ function App() {
 
       setNotice(`Notes saved for ${selectedIdea.title}.${cleanupNotice}`)
       window.setTimeout(() => setNotice(''), 5000)
+      setAiWorkspaceNotesReload((count) => count + 1)
       closeIdeaNotes()
     } catch (error) {
       let message = error.message
@@ -1950,7 +2057,10 @@ function App() {
   }
 
   const deleteIdea = async (idea) => {
-    if (!window.confirm(`Delete "${idea.title}" and all its saved notes? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this business idea?',
+      message: `Delete "${idea.title}" and all its saved notes? This cannot be undone.`,
+    })) return
     if (!supabase || !session) {
       setCloudError('Sign in to delete this business idea.')
       return
@@ -2106,7 +2216,10 @@ function App() {
   }
 
   const deleteCareerTopic = async (topic) => {
-    if (!window.confirm(`Delete "${topic.title}" and all its subtopics? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this learning topic?',
+      message: `Delete "${topic.title}" and all its subtopics? This cannot be undone.`,
+    })) return
     if (!supabase || !session) return
 
     setCareerTopicsError('')
@@ -2381,7 +2494,10 @@ function App() {
   }
 
   const deleteTransaction = async (transaction) => {
-    if (!window.confirm(`Delete "${transaction.reason || transaction.name}"? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this transaction?',
+      message: `Delete "${transaction.reason || transaction.name}"? This cannot be undone.`,
+    })) return
     if (!supabase || !session) return
     setCloudError('')
     setCloudLoading(true)
@@ -2399,7 +2515,10 @@ function App() {
   }
 
   const deleteEmi = async (emi) => {
-    if (!window.confirm(`Delete "${emi.name}" monthly commitment? Its payment history will be kept.`)) return
+    if (!await confirmAction({
+      title: 'Delete this monthly commitment?',
+      message: `Delete "${emi.name}" monthly commitment? Its payment history will be kept.`,
+    })) return
     if (!supabase || !session) return
     setCloudError('')
     setCloudLoading(true)
@@ -2590,7 +2709,10 @@ function App() {
   }
 
   const deleteChitFund = async (chitFund) => {
-    if (!window.confirm(`Delete "${chitFund.name}" chit fund and its payment months? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this chit fund?',
+      message: `Delete "${chitFund.name}" chit fund and its payment months? This cannot be undone.`,
+    })) return
     if (!supabase || !session) {
       setChitFundError('Sign in to delete this chit fund.')
       return
@@ -2685,7 +2807,10 @@ function App() {
   }
 
   const deleteTripMoneyTrip = async (trip) => {
-    if (!window.confirm(`Delete "${trip.title}" and all its trip-only expenses? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this trip analysis?',
+      message: `Delete "${trip.title}" and all its trip-only expenses? This cannot be undone.`,
+    })) return
     if (!supabase || !session) {
       setTripMoneyError('Sign in to delete trip records.')
       return
@@ -2917,7 +3042,10 @@ function App() {
   }
 
   const deleteBookingAttachment = async (trip, detail, attachment) => {
-    if (!window.confirm(`Delete attachment "${attachment.name}"? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this attachment?',
+      message: `Delete attachment "${attachment.name}"? This cannot be undone.`,
+    })) return
     if (!supabase || !session) {
       setBookingAttachmentError('Sign in to delete booking attachments.')
       return
@@ -3037,7 +3165,10 @@ function App() {
   }
 
   const deleteTripExpense = async (trip, expense) => {
-    if (!window.confirm(`Delete this ${formatMoney(Number(expense.amount))} trip expense?`)) return
+    if (!await confirmAction({
+      title: 'Delete this trip expense?',
+      message: `Delete this ${formatMoney(Number(expense.amount))} trip expense?`,
+    })) return
     if (!supabase || !session) {
       setTripMoneyError('Sign in to delete trip expenses.')
       return
@@ -3104,7 +3235,11 @@ function App() {
   }
 
   const deleteAvailableCard = async (card) => {
-    if (!window.confirm(`Remove "${card.name}" from your available credit cards?`)) return
+    if (!await confirmAction({
+      title: 'Remove this credit card?',
+      message: `Remove "${card.name}" from your available credit cards?`,
+      confirmLabel: 'Remove card',
+    })) return
     if (!supabase || !session) return
 
     setCloudError('')
@@ -3195,7 +3330,10 @@ function App() {
   }
 
   const deleteHolding = async (holding) => {
-    if (!window.confirm(`Delete "${holding.name}" holding details? Logged SIP payments will remain in monthly spending.`)) return
+    if (!await confirmAction({
+      title: 'Delete these holding details?',
+      message: `Delete "${holding.name}" holding details? Logged SIP payments will remain in monthly spending.`,
+    })) return
     if (!supabase || !session) {
       setHoldingError('Sign in to delete holding details.')
       return
@@ -3354,7 +3492,10 @@ function App() {
   }
 
   const deleteSubscription = async (subscription) => {
-    if (!window.confirm(`Delete "${subscription.name}" subscription details?`)) return
+    if (!await confirmAction({
+      title: 'Delete this subscription?',
+      message: `Delete "${subscription.name}" subscription details?`,
+    })) return
     if (!supabase || !session) {
       setSubscriptionError('Sign in to delete subscription details.')
       return
@@ -3448,7 +3589,10 @@ function App() {
   }
 
   const deleteOccasion = async (occasion) => {
-    if (!window.confirm(`Delete ${occasion.person_name}’s ${occasion.occasion_type.toLowerCase()}? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this occasion?',
+      message: `Delete ${occasion.person_name}’s ${occasion.occasion_type.toLowerCase()}? This cannot be undone.`,
+    })) return
     if (!supabase || !session) return
     setOccasionError('')
     setOccasionSaving(true)
@@ -3528,7 +3672,10 @@ function App() {
   }
 
   const deleteRecipe = async (recipe) => {
-    if (!window.confirm(`Delete "${recipe.title}"? This cannot be undone.`)) return
+    if (!await confirmAction({
+      title: 'Delete this recipe idea?',
+      message: `Delete "${recipe.title}"? This cannot be undone.`,
+    })) return
     if (!supabase || !session) return
     setRecipesError('')
     setRecipeSaving(true)
@@ -3576,6 +3723,29 @@ function App() {
   const regularTrips = trips.filter((trip) => trip.user_id === session?.user?.id && !trip.is_wishlisted_place && !trip.is_packing_checklist && !trip.is_important_document && !trip.is_trip_money_analysis)
   const tripMoneyTrips = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_trip_money_analysis)
   const importantDocuments = trips.filter((trip) => trip.user_id === session?.user?.id && trip.is_important_document)
+  const aiDataError = cloudLoadError
+    || (tripsError.startsWith('Could not load') ? tripsError : '')
+    || aiCareerTopicsError
+    || aiWorkspaceNotesError
+    || [occasionError, recipesError].find((error) => error.startsWith('Could not load')) || ''
+  const aiDataReady = Boolean(session && !cloudDataLoading && tripsLoaded && !personalCollectionsLoading && !aiCareerTopicsLoading && !aiWorkspaceNotesLoading && !aiDataError)
+  const getAiContext = (mode, monthKey) => buildAiContext(mode, {
+    transactions,
+    monthlyBudgets,
+    cards,
+    emis,
+    holdings,
+    subscriptions,
+    chitFunds,
+    trips: [...regularTrips, ...tripMoneyTrips, ...wishlistPlaces],
+    goals,
+    ideas,
+    careerTopics: aiCareerTopics,
+    workspaceNotes: aiWorkspaceNotes,
+    occasions,
+    recipes,
+    completedDays,
+  }, monthKey)
   const documentsAreUnlocked = documentsUnlocked && documentsUnlockedUserId === session?.user?.id
   const normalizedQuery = query.trim().toLowerCase()
   const searchResults = normalizedQuery ? [
@@ -3847,6 +4017,9 @@ function App() {
                     : <p className="search-empty-hint">No matching items. Try another word.</p>}
               </div>}
             </div>
+            <button type="button" className="ai-launch-button" onClick={() => { setSearchOpen(false); setAiOpen(true) }} aria-label="Open AI analysis">
+              <span className="ai-launch-spark" aria-hidden="true">✦</span><span className="ai-launch-label">AI analysis</span>
+            </button>
             <div className="notification-container">
               <button type="button" className="icon-button notification-button" aria-label={`Notifications${dueTomorrowNotifications.length ? `, ${dueTomorrowNotifications.length} due tomorrow` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen((open) => !open)}>
                 <Icon name="bell" size={18} />
@@ -4993,6 +5166,16 @@ function App() {
           <button type="submit" className="primary-button modal-submit" disabled={tripSaving}><Icon name="plus" size={16} /> {tripSaving ? 'Adding trip…' : 'Add trip'}</button>
         </form>
       </div>}
+      <AIAssistant
+        isOpen={aiOpen}
+        onClose={() => setAiOpen(false)}
+        session={session}
+        data={getAiContext}
+        dataReady={aiDataReady}
+        dataError={aiDataError}
+        confirmAction={confirmAction}
+      />
+      {confirmationDialog}
     </div>
   )
 }
